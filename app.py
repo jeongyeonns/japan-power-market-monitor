@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 
 import numpy as np
@@ -684,6 +685,55 @@ def render_excess_award_warning(
         )
 
 
+def render_hierarchical_metric_table(
+    target, data: pd.DataFrame, metric_column: str = "지표"
+) -> None:
+    """고정 지표명의 본문과 괄호 설명을 분리한 작은 비교표를 표시합니다."""
+    display = data.reset_index(names=metric_column) if metric_column not in data else data
+
+    def label_html(value: object) -> str:
+        label = str(value)
+        boundary = label.find(" (")
+        if boundary < 0:
+            return f'<span class="metric-label-main">{escape(label)}</span>'
+        main = escape(label[:boundary])
+        sub = escape(label[boundary + 1 :])
+        return (
+            f'<span class="metric-label-main">{main}</span>'
+            f'<span class="metric-label-sub">{sub}</span>'
+        )
+
+    headers = "".join(f"<th>{escape(str(column))}</th>" for column in display.columns)
+    rows = []
+    for _, row in display.iterrows():
+        cells = []
+        for column in display.columns:
+            value = row[column]
+            content = label_html(value) if column == metric_column else escape(str(value))
+            css_class = "metric-name-cell" if column == metric_column else "metric-value-cell"
+            cells.append(f'<td class="{css_class}">{content}</td>')
+        rows.append(f"<tr>{''.join(cells)}</tr>")
+    target.markdown(
+        """
+<style>
+.metric-hierarchy-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.metric-hierarchy-table th, .metric-hierarchy-table td {
+  padding: 0.45rem 0.6rem; border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+.metric-hierarchy-table th { text-align: right; font-weight: 600; }
+.metric-hierarchy-table th:first-child, .metric-name-cell { text-align: left; }
+.metric-value-cell { text-align: right; font-variant-numeric: tabular-nums; }
+.metric-label-main { color: inherit; font-size: 0.95rem; font-weight: 500; }
+.metric-label-sub { color: #8a8f98; font-size: 0.75rem; margin-left: 0.25rem; }
+@media (max-width: 700px) { .metric-label-sub { display: block; margin-left: 0; } }
+</style>
+"""
+        + f'<table class="metric-hierarchy-table"><thead><tr>{headers}</tr></thead>'
+        + f"<tbody>{''.join(rows)}</tbody></table>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_national_overview(
     target,
     data: pd.DataFrame,
@@ -733,13 +783,8 @@ def render_national_overview(
                 f"전주 비교 대상 {previous_week:%Y-%m-%d} 주차가 "
                 f"{previous_days}/7일로 불완전합니다."
             )
-    render_national_summary(
-        build_national_summary_data(
-            national, regional_summary, kpis, comparison
-        ),
-        target,
-    )
     national_over = national.loc[national["procurement_rate"] > 1]
+    source_count = None
     if not national_over.empty:
         selected_rows = data.loc[
             data["week_start"].eq(pd.Timestamp(selected_week))
@@ -750,71 +795,6 @@ def render_national_overview(
                 > selected_rows["procurement_volume"]
             ).sum()
         )
-        render_excess_award_warning(
-            target,
-            {"전국": len(national_over)},
-            source_count,
-        )
-
-    target.subheader("전국 1차 조정력 시장 핵심지표")
-    card_metrics = [
-        ("평균 모집량 (TSO별)", format_value(kpis["평균 모집량 (MW)"], ",.2f", " MW")),
-        ("평균 입찰량 (전원 소재지별)", format_value(kpis["평균 입찰량 (MW)"], ",.2f", " MW")),
-        ("평균 낙찰량 (전원 소재지별)", format_value(kpis["평균 낙찰량 (MW)"], ",.2f", " MW")),
-        (
-            "전국 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량)",
-            format_value(kpis["전국 입찰경쟁률 (배)"], ".2f", "배"),
-        ),
-        (
-            "전국 조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
-            format_value(kpis["전국 조달률 (%)"], ".2%"),
-        ),
-        (
-            "전국 가중평균 낙찰가격 (전원 소재지별)",
-            format_value(
-                kpis["전국 낙찰량 가중평균 낙찰가격"],
-                ",.2f",
-                f" {price_unit}",
-            ),
-        ),
-        ("주간 모집량 합계 (TSO별)", format_value(kpis["주간 모집량 합계"], ",.2f", " MW구간합")),
-        ("주간 입찰량 합계 (전원 소재지별)", format_value(kpis["주간 입찰량 합계"], ",.2f", " MW구간합")),
-        ("주간 낙찰량 합계 (전원 소재지별)", format_value(kpis["주간 낙찰량 합계"], ",.2f", " MW구간합")),
-        (
-            "입찰 부족 시간대 수",
-            f"{kpis['입찰경쟁률 1.0배 미만 시간대 수']}개",
-        ),
-        ("미조달 발생 시간대 수", f"{kpis['미조달 발생 시간대 수']}개"),
-        ("최대 미조달량", format_value(kpis["최대 미조달량"], ",.2f", " MW")),
-    ]
-    metric_help = {
-        "평균 모집량 (TSO별)": "일반송배전사업자(TSO)가 공고한 지역별 모집량의 평균입니다.",
-        "평균 입찰량 (전원 소재지별)": "해당 지역에 위치한 전원들의 입찰량 합계 기준 평균입니다.",
-        "평균 낙찰량 (전원 소재지별)": "해당 지역에 위치한 전원들의 낙찰량 합계 기준 평균입니다.",
-        "전국 가중평균 낙찰가격 (전원 소재지별)": (
-            "전원 소재지별 평균 낙찰가격을 전원 소재지별 낙찰량으로 가중평균한 참고값입니다."
-        ),
-        "전국 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량)": (
-            "서로 다른 지역 귀속 기준의 물량을 사용한 혼합 기준 지표입니다."
-        ),
-        "전국 조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": (
-            "서로 다른 지역 귀속 기준의 물량을 사용한 혼합 기준 지표입니다."
-        ),
-    }
-    for start in (0, 6):
-        columns = target.columns(6)
-        for column, (label, value) in zip(columns, card_metrics[start : start + 6]):
-            if "주간" in label and "합계" in label:
-                column.metric(
-                    label,
-                    value,
-                    help=(
-                        "30분 단위 각 상품구간의 MW 값을 합산한 참고값이며, "
-                        "MWh 에너지량이 아닙니다."
-                    ),
-                )
-            else:
-                column.metric(label, value, help=metric_help.get(label))
 
     target.subheader("전주 대비 전국 변화")
     if previous_week is None:
@@ -861,9 +841,8 @@ def render_national_overview(
             }
         )
         target.caption(f"비교 주차: {previous_week:%Y-%m-%d} 시작 주")
-        target.dataframe(
-            comparison_display.drop(columns=["절대 변화 단위"]),
-            width="stretch",
+        render_hierarchical_metric_table(
+            target, comparison_display.drop(columns=["절대 변화 단위"])
         )
 
     target.plotly_chart(national_price_chart(national, price_unit), width="stretch")
@@ -1006,6 +985,13 @@ def render_national_overview(
         width="stretch",
     )
 
+    if not national_over.empty:
+        render_excess_award_warning(
+            target,
+            {"전국": len(national_over)},
+            source_count,
+        )
+
     with target.expander("데이터 기준 설명"):
         st.markdown(
             """
@@ -1108,7 +1094,7 @@ def render_regional_analysis(
             "평균 미조달량 (MW)": "평균 미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)",
         }
     )
-    target.dataframe(kpi_display, width="stretch")
+    render_hierarchical_metric_table(target, kpi_display)
 
     if not over_rate.empty:
         source_over = raw_week.loc[
@@ -1179,7 +1165,7 @@ def render_regional_analysis(
         target.caption(
             f"비교 주차: {previous_meta['previous_week']:%Y-%m-%d} 시작 주"
         )
-        target.dataframe(previous_display, width="stretch")
+        render_hierarchical_metric_table(target, previous_display)
 
     target.subheader("도쿄·중부 시간대별 상세 데이터")
     detailed = profile.loc[profile["area"].isin(visible_areas)].copy()
