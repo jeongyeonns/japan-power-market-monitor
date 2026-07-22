@@ -23,7 +23,9 @@ from utils.jepx_spread import (
     calculate_daily_spread,
 )
 from views.jepx_view import (
+    ANALYSIS_WEEK_HELP_TEXT,
     render_jepx_diagnostics,
+    render_jepx_tokyo_chubu_analysis,
     render_jepx_validation,
     render_jepx_weekly_monitor,
 )
@@ -1311,13 +1313,20 @@ def render_jepx_market_placeholder() -> None:
         show_deployment_file_diagnostics("JEPX", JEPX_DATA_DIRECTORY, signatures)
 
     if not long_data.empty:
-        tab_weekly, tab_validation, tab_diagnostics = st.tabs([
-            "주간 모니터링", "계산 검증", "데이터 품질 및 파일 진단"
+        tab_tokyo_chubu, tab_weekly, tab_validation, tab_diagnostics = st.tabs([
+            "도쿄·중부 분석",
+            "전국 주간 모니터링",
+            "계산 검증",
+            "데이터 품질 및 파일 진단",
         ])
 
         def spread_provider(duration: int, mode: str) -> pd.DataFrame:
             return calculate_jepx_spread_results(long_data, duration, mode)
 
+        with tab_tokyo_chubu:
+            render_jepx_tokyo_chubu_analysis(
+                long_data, spread_provider, JEPX_AREA_DISPLAY
+            )
         with tab_weekly:
             render_jepx_weekly_monitor(long_data, spread_provider, JEPX_AREA_DISPLAY)
         with tab_validation:
@@ -1636,6 +1645,7 @@ selected_week = st.selectbox(
         f"({'데이터 완전' if week_days[value] == 7 else f'데이터 불완전: {week_days[value]}/7일'})"
     ),
 )
+st.caption(ANALYSIS_WEEK_HELP_TEXT)
 
 if week_days[selected_week] < 7:
     st.warning(

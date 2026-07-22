@@ -3,6 +3,12 @@ from pathlib import Path
 from streamlit.testing.v1 import AppTest
 
 
+ANALYSIS_WEEK_HELP_TEXT = (
+    "분석하려는 주차를 선택해 주세요. "
+    "정확한 비교를 위해 ‘데이터 완전’으로 표시된 주차를 권장합니다."
+)
+
+
 def test_market_selector_eprx_default_and_jepx_weekly_tabs():
     app = AppTest.from_file("app.py", default_timeout=60).run()
     assert not app.exception
@@ -17,6 +23,9 @@ def test_market_selector_eprx_default_and_jepx_weekly_tabs():
     week_box = next(box for box in app.selectbox if box.key == "eprx_analysis_week")
     assert str(week_box.value.date()) == "2026-07-13"
     assert any("2026-07-20" in str(value) for value in week_box.options)
+    assert sum(
+        item.value == ANALYSIS_WEEK_HELP_TEXT for item in app.caption
+    ) == 1
     assert not any(item.key == "frequency_zone_view_mode" for item in app.radio)
     expander_labels = [item.label for item in app.expander]
     assert "데이터 출처 및 원본 파일 정보" in expander_labels
@@ -38,7 +47,8 @@ def test_market_selector_eprx_default_and_jepx_weekly_tabs():
     app.radio[0].set_value("JEPX 현물시장").run()
     assert not app.exception
     assert [tab.label for tab in app.tabs] == [
-        "주간 모니터링",
+        "도쿄·중부 분석",
+        "전국 주간 모니터링",
         "계산 검증",
         "데이터 품질 및 파일 진단",
     ]
@@ -51,6 +61,12 @@ def test_market_selector_eprx_default_and_jepx_weekly_tabs():
     )
     assert "JEPX Day-Ahead 현물가격 및 ESS 스프레드 분석" in visible_text
     assert "실제 JEPX Day-Ahead 파일이 연결되었습니다" in visible_text
+    assert any(box.key == "jepx_tokyo_chubu_week" for box in app.selectbox)
+    assert any(box.key == "jepx_tokyo_chubu_duration" for box in app.selectbox)
+    assert any(box.key == "jepx_tokyo_chubu_operation_mode" for box in app.selectbox)
+    assert sum(
+        item.value == ANALYSIS_WEEK_HELP_TEXT for item in app.caption
+    ) == 2
     assert any(box.key == "jepx_week_start" for box in app.selectbox)
     assert any(box.key == "jepx_weekly_area" for box in app.selectbox)
     assert any(box.key == "jepx_weekly_duration" for box in app.selectbox)
