@@ -4,14 +4,21 @@ import pandas as pd
 from utils.jepx_loader import AREA_DISPLAY
 from utils.jepx_weekly_analysis import (
     calculate_charge_discharge_time_frequency, calculate_week_over_week,
+    calculate_tokyo_chubu_week_over_week,
+    calculate_tokyo_chubu_weekly_comparison,
     calculate_weekly_area_kpis, compare_area_price_series,
     create_area_price_spread_comparison, create_jepx_weekly_summary,
+    create_tokyo_chubu_price_profile,
     filter_weekly_spreads, format_spread_change, initial_daily_spread_areas,
     order_daily_spread_areas, reconcile_daily_spread_areas,
     resolve_daily_spread_areas,
     sort_week_over_week_by_absolute_change,
 )
-from utils.jepx_charts import create_daily_spread_chart
+from utils.jepx_charts import (
+    create_daily_spread_chart,
+    create_tokyo_chubu_daily_spread_chart,
+    create_tokyo_chubu_price_profile_chart,
+)
 
 
 def daily(area="Tokyo", values=(2, 4, -1), complete=True):
@@ -120,6 +127,99 @@ def test_comparison_previous_week_and_incomplete_exclusion():
     assert result.previous_week_average_spread == 3
     assert result.week_over_week_change == 7
     assert result.excluded_days == 1
+
+
+def test_tokyo_chubu_comparison_reuses_weekly_results_and_filters_areas():
+    spreads = pd.concat(
+        [
+            daily("Tokyo", (2, 4, 4)),
+            daily("Chubu", (1, 2, 3)),
+            daily("System", (20, 20, 20)),
+        ],
+        ignore_index=True,
+    )
+    prices = pd.DataFrame(
+        [
+            {"delivery_date": "2026-07-13", "area": area, "price": price}
+            for area, values in {
+                "Tokyo": (10, 20, 30), "Chubu": (5, 10, 15), "System": (50,)
+            }.items()
+            for price in values
+        ]
+    )
+    result = calculate_tokyo_chubu_weekly_comparison(
+        prices, spreads, "2026-07-13", 2, "nem_best_case"
+    )
+    tokyo = result[result.area.eq("Tokyo")].iloc[0]
+    assert result["area"].tolist() == ["Tokyo", "Chubu"]
+    assert tokyo.average_market_price == 20
+    assert tokyo.average_spread == 10 / 3
+    assert tokyo.maximum_spread == 4
+    assert tokyo.maximum_spread_date == pd.Timestamp("2026-07-14")
+    assert tokyo.positive_spread_days == 3
+
+
+def test_tokyo_chubu_week_over_week_and_missing_previous_are_nan_safe():
+    current = pd.concat([daily("Tokyo", (4, 4)), daily("Chubu", (2, 2))])
+    previous = pd.concat([daily("Tokyo", (1, 1)), daily("Chubu", (3, 3))]).assign(
+        delivery_date=lambda frame: frame.delivery_date - pd.Timedelta(days=7)
+    )
+    spreads = pd.concat([current, previous], ignore_index=True)
+    prices = pd.DataFrame(
+        [
+            {"delivery_date": date, "area": area, "price": price}
+            for date in ("2026-07-06", "2026-07-13")
+            for area, price in (("Tokyo", 20), ("Chubu", 10))
+        ]
+    )
+    result = calculate_tokyo_chubu_week_over_week(
+        prices, spreads, "2026-07-13", 2, "nem_best_case"
+    )
+    tokyo_spread = result[
+        result.area.eq("Tokyo") & result.metric.eq("평균 ESS 스프레드")
+    ].iloc[0]
+    chubu_spread = result[
+        result.area.eq("Chubu") & result.metric.eq("평균 ESS 스프레드")
+    ].iloc[0]
+    assert tokyo_spread.change == 3
+    assert chubu_spread.change == -1
+
+    no_previous = calculate_tokyo_chubu_week_over_week(
+        prices[prices.delivery_date.eq("2026-07-13")],
+        current,
+        "2026-07-13",
+        2,
+        "nem_best_case",
+    )
+    assert no_previous["previous"].isna().all()
+    assert no_previous["change"].isna().all()
+
+
+def test_tokyo_chubu_price_profile_and_charts_keep_two_regions():
+    prices = pd.DataFrame(
+        [
+            {
+                "delivery_date": date,
+                "area": area,
+                "period_no": period,
+                "period_start": start,
+                "price": base + period,
+            }
+            for date in ("2026-07-13", "2026-07-14")
+            for area, base in (("Tokyo", 10), ("Chubu", 5), ("System", 20))
+            for period, start in ((1, "00:00"), (2, "00:30"))
+        ]
+    )
+    profile = create_tokyo_chubu_price_profile(prices, "2026-07-13")
+    assert set(profile.area) == {"Tokyo", "Chubu"}
+    assert profile.observation_days.eq(2).all()
+    price_chart = create_tokyo_chubu_price_profile_chart(profile, AREA_DISPLAY)
+    assert {trace.name for trace in price_chart.data} == {"도쿄", "중부"}
+
+    daily_chart = create_tokyo_chubu_daily_spread_chart(
+        pd.concat([daily("Tokyo"), daily("Chubu"), daily("System")]), AREA_DISPLAY
+    )
+    assert {trace.name for trace in daily_chart.data} == {"도쿄", "중부"}
 
 
 def test_change_display_negative_zero_and_nan():

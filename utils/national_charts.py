@@ -18,21 +18,21 @@ def national_price_chart(profile: pd.DataFrame, price_unit: str) -> go.Figure:
         y="avg_price",
         custom_data=["awarded_volume", "area_count"],
         category_orders={"period_start": PERIOD_ORDER},
-        title="전국 낙찰량 가중평균 낙찰가격",
+        title="전국 낙찰량 가중평균 낙찰가격 (전원 소재지별)",
         labels={
             "period_start": "시간대",
-            "avg_price": f"가중평균 낙찰가격 ({price_unit})",
+            "avg_price": f"가중평균 낙찰가격 (전원 소재지별, {price_unit})",
         },
     )
     figure.update_traces(
         name="전국 가중평균 참고값",
         hovertemplate=(
-            "시간대=%{x}<br>가중평균 낙찰가격=%{y:,.2f}<br>"
-            "전국 낙찰량=%{customdata[0]:,.2f} MW<br>"
+            "시간대=%{x}<br>가중평균 낙찰가격(전원 소재지별)=%{y:,.2f}<br>"
+            "전국 낙찰량(전원 소재지별)=%{customdata[0]:,.2f} MW<br>"
             "포함 지역 수=%{customdata[1]}<extra></extra>"
         ),
     )
-    return _finish(figure, f"가중평균 낙찰가격 ({price_unit})")
+    return _finish(figure, f"가중평균 낙찰가격 (전원 소재지별, {price_unit})")
 
 
 def national_volume_chart(profile: pd.DataFrame) -> go.Figure:
@@ -44,9 +44,9 @@ def national_volume_chart(profile: pd.DataFrame) -> go.Figure:
     )
     data["물량 구분"] = data["type"].map(
         {
-            "procurement_volume": "모집량",
-            "bid_volume": "입찰량",
-            "awarded_volume": "낙찰량",
+            "procurement_volume": "모집량 (TSO별)",
+            "bid_volume": "입찰량 (전원 소재지별)",
+            "awarded_volume": "낙찰량 (전원 소재지별)",
         }
     )
     figure = px.line(
@@ -66,14 +66,14 @@ def national_ratio_chart(
 ) -> go.Figure:
     if metric == "bid_coverage_ratio":
         title, y_title, annotation = (
-            "전국 시간대별 입찰경쟁률",
-            "입찰경쟁률 (배)",
+            "전국 시간대별 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량)",
+            "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
             "모집량 충족 기준 (1.0배)",
         )
     else:
         title, y_title, annotation = (
-            "전국 시간대별 조달률",
-            "조달률",
+            "전국 시간대별 조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
+            "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
             "모집량 대비 100%",
         )
     figure = px.line(
@@ -114,19 +114,19 @@ def regional_volume_bar(summary: pd.DataFrame) -> go.Figure:
         y="avg_procurement_volume",
         color="frequency_zone",
         custom_data=["avg_bid_volume", "avg_awarded_volume"],
-        title="지역별 주간 평균 모집량 비교",
+        title="지역별 주간 평균 모집량 비교 (TSO별)",
         labels={
             "area_display": "지역",
-            "avg_procurement_volume": "평균 모집량 (MW)",
+            "avg_procurement_volume": "평균 모집량 (TSO별, MW)",
             "frequency_zone": "주파수권역",
         },
     )
     figure.update_traces(
         hovertemplate=(
             "지역=%{x}<br>주파수권역=%{fullData.name}<br>"
-            "평균 모집량=%{y:,.2f} MW<br>"
-            "평균 입찰량=%{customdata[0]:,.2f} MW<br>"
-            "평균 낙찰량=%{customdata[1]:,.2f} MW<extra></extra>"
+            "평균 모집량(TSO별)=%{y:,.2f} MW<br>"
+            "평균 입찰량(전원 소재지별)=%{customdata[0]:,.2f} MW<br>"
+            "평균 낙찰량(전원 소재지별)=%{customdata[1]:,.2f} MW<extra></extra>"
         )
     )
     return figure
@@ -139,10 +139,10 @@ def regional_price_bar(summary: pd.DataFrame, price_unit: str) -> go.Figure:
         x="area_display",
         y="weighted_avg_price",
         color="frequency_zone",
-        title="지역별 낙찰량 가중평균 낙찰가격 참고지표",
+        title="지역별 낙찰량 가중평균 낙찰가격 참고지표 (전원 소재지별)",
         labels={
             "area_display": "지역",
-            "weighted_avg_price": f"가중평균 낙찰가격 ({price_unit})",
+            "weighted_avg_price": f"가중평균 낙찰가격 (전원 소재지별, {price_unit})",
             "frequency_zone": "주파수권역",
         },
     )
@@ -155,10 +155,10 @@ def regional_bid_bar(summary: pd.DataFrame) -> go.Figure:
         x="area_display",
         y="bid_coverage_ratio",
         color="frequency_zone",
-        title="지역별 입찰경쟁률",
+        title="지역별 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량)",
         labels={
             "area_display": "지역",
-            "bid_coverage_ratio": "입찰경쟁률 (배)",
+            "bid_coverage_ratio": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
             "frequency_zone": "주파수권역",
         },
     )

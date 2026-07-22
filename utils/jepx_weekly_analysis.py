@@ -209,6 +209,126 @@ def create_area_price_spread_comparison(
     return result.sort_values("average_spread", ascending=False, na_position="last").reset_index(drop=True)
 
 
+def calculate_tokyo_chubu_weekly_comparison(
+    normalized_price_data: pd.DataFrame,
+    daily_spread_data: pd.DataFrame,
+    selected_week,
+    duration_hours: int,
+    operation_mode: str,
+) -> pd.DataFrame:
+    """기존 주간 집계를 재사용해 도쿄·중부 핵심 비교표를 반환합니다."""
+    areas = ["Tokyo", "Chubu"]
+    comparison = create_area_price_spread_comparison(
+        normalized_price_data,
+        daily_spread_data,
+        selected_week,
+        duration_hours,
+        operation_mode,
+    )
+    weekly = filter_weekly_spreads(daily_spread_data, selected_week)
+    weekly = weekly[
+        weekly["area"].isin(areas)
+        & weekly["duration_hours"].eq(duration_hours)
+        & weekly["operation_mode"].eq(operation_mode)
+    ]
+    kpis = calculate_weekly_area_kpis(weekly)
+    comparison = comparison[comparison["area"].isin(areas)].copy()
+    if kpis.empty:
+        comparison["positive_spread_days"] = np.nan
+    else:
+        comparison = comparison.merge(
+            kpis[["area", "positive_spread_days"]], on="area", how="left"
+        )
+    order = pd.Categorical(comparison["area"], categories=areas, ordered=True)
+    return comparison.assign(_area_order=order).sort_values("_area_order").drop(
+        columns="_area_order"
+    ).reset_index(drop=True)
+
+
+def create_tokyo_chubu_price_profile(
+    normalized_price_data: pd.DataFrame, selected_week
+) -> pd.DataFrame:
+    """선택 주차 도쿄·중부의 48개 시간대 가격 통계를 반환합니다."""
+    start = pd.Timestamp(selected_week).normalize()
+    prices = normalized_price_data.copy()
+    prices["delivery_date"] = pd.to_datetime(prices["delivery_date"]).dt.normalize()
+    prices = prices[
+        prices["delivery_date"].between(start, start + pd.Timedelta(days=6))
+        & prices["area"].isin(["Tokyo", "Chubu"])
+    ]
+    return prices.groupby(
+        ["area", "period_no", "period_start"], as_index=False
+    ).agg(
+        mean_price=("price", "mean"),
+        min_price=("price", "min"),
+        max_price=("price", "max"),
+        observation_days=("delivery_date", "nunique"),
+    )
+
+
+def calculate_tokyo_chubu_week_over_week(
+    normalized_price_data: pd.DataFrame,
+    daily_spread_data: pd.DataFrame,
+    selected_week,
+    duration_hours: int,
+    operation_mode: str,
+) -> pd.DataFrame:
+    """도쿄·중부의 현재 주·전주 핵심 지표와 절대 변화를 반환합니다."""
+    current = calculate_tokyo_chubu_weekly_comparison(
+        normalized_price_data,
+        daily_spread_data,
+        selected_week,
+        duration_hours,
+        operation_mode,
+    )
+    previous_start = pd.Timestamp(selected_week) - pd.Timedelta(days=7)
+    previous_daily = filter_weekly_spreads(daily_spread_data, previous_start)
+    if previous_daily.empty:
+        previous = pd.DataFrame(
+            columns=[
+                "area",
+                "average_market_price",
+                "average_charge_price",
+                "average_discharge_price",
+                "average_spread",
+                "maximum_spread",
+                "positive_spread_days",
+            ]
+        )
+    else:
+        previous = calculate_tokyo_chubu_weekly_comparison(
+            normalized_price_data,
+            daily_spread_data,
+            previous_start,
+            duration_hours,
+            operation_mode,
+        )
+    metrics = {
+        "평균 전력가격": "average_market_price",
+        "평균 충전가격": "average_charge_price",
+        "평균 방전가격": "average_discharge_price",
+        "평균 ESS 스프레드": "average_spread",
+        "최대 ESS 스프레드": "maximum_spread",
+        "양의 스프레드 일수": "positive_spread_days",
+    }
+    merged = current.merge(previous, on="area", how="left", suffixes=("_current", "_previous"))
+    rows = []
+    for _, area_row in merged.iterrows():
+        for metric_label, column in metrics.items():
+            current_value = area_row.get(f"{column}_current", np.nan)
+            previous_value = area_row.get(f"{column}_previous", np.nan)
+            rows.append(
+                {
+                    "area": area_row["area"],
+                    "metric": metric_label,
+                    "current": current_value,
+                    "previous": previous_value,
+                    "change": current_value - previous_value,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def compare_area_price_series(long_data: pd.DataFrame, week_start) -> pd.DataFrame:
     """선택 주차의 코마별 지역가격 동일 여부를 실제 데이터로 비교합니다."""
     start = pd.Timestamp(week_start).normalize()

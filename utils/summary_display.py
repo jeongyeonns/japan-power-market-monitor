@@ -245,13 +245,13 @@ def national_summary_markdown(summary: dict[str, Any]) -> str:
     lines = [
         "### 이번 주 전국 시장 요약",
         "",
-        f"- **평균 모집량:** 전주 대비 **{_change_text(volume, ' MW')}**",
-        f"- **낙찰량 가중평균 낙찰가격:** 전주 대비 **{_change_text(price)}**",
-        f"- **지역별 입찰경쟁률:** 최저 **{summary['lowest_competition_area']}**, 최고 **{summary['highest_competition_area']}**",
-        f"- **지역별 가중평균 낙찰가격:** 최고 **{summary['highest_price_area']}**, 최저 **{summary['lowest_price_area']}**",
+        f"- **평균 모집량 (TSO별):** 전주 대비 **{_change_text(volume, ' MW')}**",
+        f"- **낙찰량 가중평균 낙찰가격 (전원 소재지별):** 전주 대비 **{_change_text(price)}**",
+        f"- **지역별 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량):** 최저 **{summary['lowest_competition_area']}**, 최고 **{summary['highest_competition_area']}**",
+        f"- **지역별 가중평균 낙찰가격 (전원 소재지별):** 최고 **{summary['highest_price_area']}**, 최저 **{summary['lowest_price_area']}**",
         f"- **입찰 부족 시간대:** **{_count(summary['shortage_period_count'])}**",
         f"- **최대 미조달:** **{summary['max_shortage_period']}**, **{_number(summary['max_shortage_volume'], ' MW')}**",
-        "- **권역별 입찰경쟁률**",
+        "- **권역별 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량)**",
     ]
     for zone in ("50Hz", "60Hz"):
         lines.append(

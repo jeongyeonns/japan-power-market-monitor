@@ -31,21 +31,21 @@ def area_price_chart(
         custom_data=["awarded_volume"],
         category_orders={"period_start": PERIOD_ORDER},
         color_discrete_map=AREA_COLORS,
-        title="도쿄·중부 시간대별 평균 낙찰가격",
+        title="도쿄·중부 시간대별 평균 낙찰가격 (전원 소재지별)",
         labels={
             "period_start": "시간대",
-            "avg_price": f"평균 낙찰가격 ({price_unit})",
+            "avg_price": f"평균 낙찰가격 (전원 소재지별, {price_unit})",
             "지역": "지역",
         },
     )
     figure.update_traces(
         hovertemplate=(
             "지역=%{fullData.name}<br>시간대=%{x}<br>"
-            f"평균 낙찰가격=%{{y:,.2f}} {price_unit}<br>"
-            "낙찰량=%{customdata[0]:,.2f} MW<extra></extra>"
+            f"평균 낙찰가격(전원 소재지별)=%{{y:,.2f}} {price_unit}<br>"
+            "낙찰량(전원 소재지별)=%{customdata[0]:,.2f} MW<extra></extra>"
         )
     )
-    return _finish(figure, f"평균 낙찰가격 ({price_unit})")
+    return _finish(figure, f"평균 낙찰가격 (전원 소재지별, {price_unit})")
 
 
 def area_price_range_chart(
@@ -60,23 +60,23 @@ def area_price_range_chart(
         custom_data=["max_price", "avg_price", "min_price"],
         category_orders={"period_start": PERIOD_ORDER},
         color_discrete_map=AREA_COLORS,
-        title="도쿄·중부 시간대별 낙찰가격 범위",
+        title="도쿄·중부 시간대별 낙찰가격 범위 (전원 소재지별)",
         labels={
             "period_start": "시간대",
-            "price_range": f"가격 범위 ({price_unit})",
+            "price_range": f"가격 범위 (전원 소재지별, {price_unit})",
             "지역": "지역",
         },
     )
     figure.update_traces(
         hovertemplate=(
             "지역=%{fullData.name}<br>시간대=%{x}<br>"
-            "최고 낙찰가격=%{customdata[0]:,.2f}<br>"
-            "평균 낙찰가격=%{customdata[1]:,.2f}<br>"
-            "최저 낙찰가격=%{customdata[2]:,.2f}<br>"
+            "최고 낙찰가격(전원 소재지별)=%{customdata[0]:,.2f}<br>"
+            "평균 낙찰가격(전원 소재지별)=%{customdata[1]:,.2f}<br>"
+            "최저 낙찰가격(전원 소재지별)=%{customdata[2]:,.2f}<br>"
             "가격 범위=%{y:,.2f}<extra></extra>"
         )
     )
-    return _finish(figure, f"가격 범위 ({price_unit})")
+    return _finish(figure, f"가격 범위 (전원 소재지별, {price_unit})")
 
 
 def area_volume_chart(profile: pd.DataFrame, area: str) -> go.Figure:
@@ -88,9 +88,9 @@ def area_volume_chart(profile: pd.DataFrame, area: str) -> go.Figure:
         value_name="volume",
     )
     names = {
-        "procurement_volume": "모집량",
-        "bid_volume": "입찰량",
-        "awarded_volume": "낙찰량",
+        "procurement_volume": "모집량 (TSO별)",
+        "bid_volume": "입찰량 (전원 소재지별)",
+        "awarded_volume": "낙찰량 (전원 소재지별)",
     }
     long_data["물량 구분"] = long_data["volume_type"].map(names)
     figure = px.line(
@@ -120,10 +120,10 @@ def area_bid_coverage_chart(
         color="지역",
         category_orders={"period_start": PERIOD_ORDER},
         color_discrete_map=AREA_COLORS,
-        title="도쿄·중부 시간대별 입찰경쟁률",
+        title="도쿄·중부 시간대별 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량)",
         labels={
             "period_start": "시간대",
-            "bid_coverage_ratio": "입찰경쟁률 (배)",
+            "bid_coverage_ratio": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
             "지역": "지역",
         },
     )
@@ -145,7 +145,7 @@ def area_bid_coverage_chart(
         annotation_text="모집량 충족 기준 (1.0배)",
         annotation_position="top left",
     )
-    return _finish(figure, "입찰경쟁률 (배)")
+    return _finish(figure, "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)")
 
 
 def area_procurement_rate_chart(
@@ -160,18 +160,18 @@ def area_procurement_rate_chart(
         custom_data=["procurement_volume", "awarded_volume"],
         category_orders={"period_start": PERIOD_ORDER},
         color_discrete_map=AREA_COLORS,
-        title="도쿄·중부 시간대별 조달률",
+        title="도쿄·중부 시간대별 조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
         labels={
             "period_start": "시간대",
-            "procurement_rate": "조달률",
+            "procurement_rate": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
             "지역": "지역",
         },
     )
     figure.update_traces(
         hovertemplate=(
             "지역=%{fullData.name}<br>시간대=%{x}<br>"
-            "모집량=%{customdata[0]:,.2f} MW<br>"
-            "낙찰량=%{customdata[1]:,.2f} MW<br>"
+            "모집량(TSO별)=%{customdata[0]:,.2f} MW<br>"
+            "낙찰량(전원 소재지별)=%{customdata[1]:,.2f} MW<br>"
             "조달률=%{y:.2%}<extra></extra>"
         )
     )
@@ -183,7 +183,7 @@ def area_procurement_rate_chart(
         annotation_position="top left",
     )
     figure.update_yaxes(tickformat=".0%")
-    return _finish(figure, "조달률")
+    return _finish(figure, "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)")
 
 
 def _finish(figure: go.Figure, y_title: str) -> go.Figure:
