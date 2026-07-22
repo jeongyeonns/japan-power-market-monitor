@@ -84,11 +84,6 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIRECTORY = BASE_DIR / "data" / "eprx"
 JEPX_DATA_DIRECTORY = BASE_DIR / "data" / "jepx" / "raw"
 ZONE_COLORS = {"50Hz": "#1f77b4", "60Hz": "#d62728"}
-VIEW_TO_ZONES = {
-    "50Hz·60Hz 비교": ["50Hz", "60Hz"],
-    "50Hz": ["50Hz"],
-    "60Hz": ["60Hz"],
-}
 
 DATA_SOURCE_ACTUAL = "실제 EPRX 파일"
 DATA_SOURCE_SAMPLE = "샘플 데이터"
@@ -356,9 +351,23 @@ def show_diagnostics(
     error_data: pd.DataFrame,
     regional_profile: pd.DataFrame | None = None,
     target=st,
+    title: str = "데이터 품질 및 파일 진단",
+    deployment_directory: Path | None = None,
+    deployment_signatures: tuple[tuple[str, int, int], ...] = (),
 ) -> None:
     """파일 처리와 선택 주의 품질 진단을 표시합니다."""
-    with target.expander("데이터 품질 및 파일 진단"):
+    with target.expander(title):
+        if deployment_directory is not None:
+            st.caption("배포 파일 탐색 및 읽기 상태")
+            st.dataframe(
+                deployment_file_diagnostics(
+                    "EPRX", deployment_directory, deployment_signatures
+                ),
+                width="stretch",
+            )
+            st.caption(
+                "캐시 정책: 파일 경로·수정시각·크기가 바뀌면 실제 데이터 캐시를 갱신합니다."
+            )
         if file_summary.empty:
             st.info("지원 가능한 실제 파일이 없습니다.")
         else:
@@ -437,6 +446,55 @@ def show_diagnostics(
                 }
             )
             st.dataframe(error_display, width="stretch")
+
+
+def show_eprx_source_information(
+    data_source: str,
+    data: pd.DataFrame,
+    file_summary: pd.DataFrame,
+    price_unit: str,
+    volume_unit: str,
+) -> None:
+    """분석 아래에서 데이터 출처와 원본 파일 메타데이터를 표시합니다."""
+    actual = data_source == DATA_SOURCE_ACTUAL
+    successful = (
+        file_summary.loc[file_summary["success"].fillna(False)].copy()
+        if actual and not file_summary.empty
+        else pd.DataFrame()
+    )
+    source_status = (
+        ", ".join(map(str, data["source_status"].dropna().unique()))
+        if actual and "source_status" in data
+        else "가상 샘플"
+    ) or "확인 불가"
+    source_status = source_status.replace("速報値", "속보치").replace(
+        "確報値", "확정치"
+    )
+    latest_modified = (
+        successful["modified_at"].max() if not successful.empty else pd.NaT
+    )
+    with st.expander("데이터 출처 및 원본 파일 정보"):
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    ("데이터 소스", "실제 EPRX 파일" if actual else "가상 샘플"),
+                    ("원본 파일명", ", ".join(successful["source_file"].astype(str)) if not successful.empty else "해당 없음"),
+                    ("데이터 기간", f"{data['delivery_date'].min():%Y-%m-%d} ~ {data['delivery_date'].max():%Y-%m-%d}"),
+                    ("마지막 파일 수정시각", f"{latest_modified:%Y-%m-%d %H:%M:%S %Z}" if pd.notna(latest_modified) else "해당 없음"),
+                    ("데이터 상태", source_status),
+                    ("가격 단위", price_unit),
+                    ("물량 단위", volume_unit),
+                    ("정규화 행 수", f"{len(data):,}행"),
+                    ("지원 파일 수", f"{len(successful):,}개" if actual else "해당 없음"),
+                ],
+                columns=["항목", "내용"],
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        if not successful.empty:
+            st.caption("원본 파일별 정보")
+            st.dataframe(successful, width="stretch", hide_index=True)
 
 
 def show_update_result(result: dict[str, object]) -> None:
@@ -653,18 +711,9 @@ def render_national_overview(
         "낙찰가격을 낙찰량으로 가중한 값입니다. 일본 전체에 공통으로 적용되는 "
         "단일 낙찰가격을 의미하지 않습니다."
     )
-    file_count = (
-        int(file_summary["success"].fillna(False).sum())
-        if not file_summary.empty
-        else 0
-    )
     target.caption(
         f"분석 주차 {pd.Timestamp(selected_week):%Y-%m-%d} 시작 | "
-        f"데이터 기간 {data['delivery_date'].min():%Y-%m-%d}~"
-        f"{data['delivery_date'].max():%Y-%m-%d} | "
         f"포함 지역 {int(national['area_count'].max()) if not national.empty else 0}/9 | "
-        f"원본 파일 {file_count if file_count else '샘플'} | "
-        f"가격 단위 {price_unit} | 물량 단위 {volume_unit} | "
         f"데이터 완전성 "
         f"{'완전' if not national.empty and national['completeness_flag'].eq('Complete').all() else '불완전'}"
     )
@@ -986,31 +1035,9 @@ def render_regional_analysis(
             f"{previous_meta['previous_days']}/7일로 불완전합니다."
         )
 
-    render_regional_summary(
-        build_regional_summary_data(
-            profile, kpi_table, previous, visible_areas
-        ),
-        target,
-    )
     over_rate = profile.loc[profile["procurement_rate"] > 1]
-    if not over_rate.empty:
-        source_over = raw_week.loc[
-            raw_week["area"].isin(["Tokyo", "Chubu"])
-            & (
-                raw_week["awarded_volume"]
-                > raw_week["procurement_volume"]
-            )
-        ]
-        render_excess_award_warning(
-            target,
-            {
-                AREA_DISPLAY[area]: int(count)
-                for area, count in over_rate.groupby("area").size().items()
-            },
-            len(source_over),
-        )
 
-    target.subheader("도쿄·중부 주간 핵심지표 비교")
+    target.subheader("주간 핵심지표 비교")
     kpi_display = kpi_table.copy().astype(object)
     percent_rows = {"조달률 (%)", "입찰 대비 낙찰률 (%)"}
     times_rows = {"입찰경쟁률 (배)"}
@@ -1038,6 +1065,23 @@ def render_regional_analysis(
         }
     )
     target.dataframe(kpi_display, width="stretch")
+
+    if not over_rate.empty:
+        source_over = raw_week.loc[
+            raw_week["area"].isin(["Tokyo", "Chubu"])
+            & (
+                raw_week["awarded_volume"]
+                > raw_week["procurement_volume"]
+            )
+        ]
+        render_excess_award_warning(
+            target,
+            {
+                AREA_DISPLAY[area]: int(count)
+                for area, count in over_rate.groupby("area").size().items()
+            },
+            len(source_over),
+        )
 
     target.plotly_chart(
         area_price_chart(profile, visible_areas, price_unit), width="stretch"
@@ -1392,7 +1436,7 @@ if selected_market == "JEPX 현물시장":
     render_jepx_market_placeholder()
     st.stop()
 
-st.header("EPRX 1차 조정력 주파수권역 주간 모니터")
+st.header("EPRX 1차 조정력 주간 모니터")
 
 with st.sidebar.expander("EPRX 데이터 업데이트"):
     approval_enabled = automation_approved()
@@ -1506,24 +1550,12 @@ if data_source == DATA_SOURCE_ACTUAL:
         ", ".join(map(str, data["source_status"].dropna().unique())) or "확인 불가"
     )
     statuses = statuses.replace("速報値", "속보치").replace("確報値", "확정치")
-    successful_files = int(file_summary["success"].fillna(False).sum())
-    latest_modified = file_summary.loc[
-        file_summary["success"].fillna(False), "modified_at"
-    ].max()
-    st.info(
-        f"실제 EPRX 원본 {successful_files}개 사용 | "
-        f"데이터 기간 {data['delivery_date'].min():%Y-%m-%d}~{data['delivery_date'].max():%Y-%m-%d} | "
-        f"마지막 파일 수정 {latest_modified:%Y-%m-%d %H:%M:%S %Z} | "
-        f"가격 단위 {price_units} | 물량 단위 {volume_units} | 데이터 상태 {statuses}"
-    )
-    show_deployment_file_diagnostics("EPRX", DATA_DIRECTORY, signatures)
 else:
     data = load_sample_data()
     price_units = "샘플 가격 단위"
     volume_units = "MW"
-    st.info(
-        "현재 실제 시장 데이터가 아닌 샘플 데이터를 표시하고 있습니다. "
-        "매주 7일의 동일 30분 시간대를 평균해 주파수권역으로 집계합니다."
+    st.warning(
+        "현재 가상 샘플 데이터를 사용하고 있습니다. 실제 EPRX 거래 결과가 아닙니다."
     )
 
 week_days = data.groupby("week_start")["delivery_date"].nunique().to_dict()
@@ -1537,6 +1569,10 @@ if not week_options:
 selected_week = st.selectbox(
     "분석 주차",
     week_options,
+    index=next(
+        (index for index, week in enumerate(week_options) if week_days[week] == 7),
+        0,
+    ),
     key="eprx_analysis_week",
     format_func=lambda value: (
         f"{pd.Timestamp(value):%Y-%m-%d} ~ "
@@ -1564,23 +1600,8 @@ if not incomplete.empty:
         f"7개 미만 관측값을 가진 지역·시간대가 {len(incomplete)}개 있습니다."
     )
 
-missing = find_missing_areas(regional_profile)
-if missing:
-    message = "; ".join(
-        f"{zone}: {', '.join(DISPLAY_AREA_NAMES.get(area, area) for area in areas)}"
-        for zone, areas in missing.items()
-    )
-    st.warning(f"권역 집계에 필요한 지역이 누락되었습니다. {message}")
-
-zone_profile = create_zone_weekly_profile(regional_profile)
-if zone_profile.empty:
-    st.warning("권역 프로파일을 만들 수 없습니다.")
-    if data_source == DATA_SOURCE_ACTUAL:
-        show_diagnostics(file_summary, error_data, regional_profile)
-    st.stop()
-
-tab_zone, tab_regional, tab_national = st.tabs(
-    ["주파수권역 분석", "도쿄·중부 상세분석", "전국 시장 요약"]
+tab_regional, tab_national = st.tabs(
+    ["도쿄·중부 상세분석", "전국 시장 요약"]
 )
 render_national_overview(
     tab_national,
@@ -1592,159 +1613,6 @@ render_national_overview(
     volume_units,
     file_summary,
 )
-view = tab_zone.radio(
-    "보기 방식",
-    list(VIEW_TO_ZONES),
-    horizontal=True,
-    key="frequency_zone_view_mode",
-)
-zones = VIEW_TO_ZONES[view]
-
-tab_zone.subheader("주간 핵심지표 비교")
-show_kpi_table(zone_profile, price_units, target=tab_zone)
-
-over_100 = zone_profile.loc[zone_profile["procurement_rate"] > 1]
-if not over_100.empty:
-    selected_rows = data.loc[data["week_start"].eq(pd.Timestamp(selected_week))]
-    source_over = selected_rows.loc[
-        selected_rows["awarded_volume"] > selected_rows["procurement_volume"]
-    ]
-    render_excess_award_warning(
-        tab_zone,
-        {
-            zone: int(count)
-            for zone, count in over_100.groupby("frequency_zone").size().items()
-        },
-        len(source_over),
-    )
-
-tab_zone.plotly_chart(
-    line_chart(
-        zone_profile,
-        "avg_price",
-        "주파수권역별 가중평균 낙찰가격",
-        zones,
-        f"가중평균 낙찰가격 ({price_units})",
-    ),
-    width="stretch",
-)
-
-tab_zone.subheader("주파수권역별 물량 프로파일")
-if view == "50Hz·60Hz 비교":
-    columns = tab_zone.columns(2)
-    for column, zone in zip(columns, zones):
-        selected = zone_profile.loc[zone_profile["frequency_zone"] == zone]
-        column.plotly_chart(volume_chart(selected, zone), width="stretch")
-else:
-    selected = zone_profile.loc[zone_profile["frequency_zone"] == zones[0]]
-    tab_zone.plotly_chart(volume_chart(selected, zones[0]), width="stretch")
-
-tab_zone.plotly_chart(
-    line_chart(
-        zone_profile,
-        "bid_coverage_ratio",
-        "주파수권역별 입찰경쟁률",
-        zones,
-        "입찰경쟁률 (배)",
-        reference_line=True,
-    ),
-    width="stretch",
-)
-
-tab_zone.caption(
-    "입찰경쟁률은 입찰량을 모집량으로 나눈 값입니다. 1.0배 이상이면 입찰량이 "
-    "모집량 이상이고, 1.0배 미만이면 입찰량이 모집량보다 부족함을 의미합니다."
-)
-
-tab_zone.subheader("주파수권역별 상세 데이터")
-display_columns = [
-    "frequency_zone",
-    "period_no",
-    "period_start",
-    "procurement_volume",
-    "bid_volume",
-    "awarded_volume",
-    "avg_price",
-    "max_price",
-    "min_price",
-    "bid_coverage_ratio",
-    "procurement_rate",
-    "award_rate",
-    "excess_bid_volume",
-    "shortage_volume",
-]
-display_data = zone_profile.loc[
-    zone_profile["frequency_zone"].isin(zones), display_columns
-].copy()
-display_data["period_start"] = display_data["period_start"].astype(str).str[:5]
-display_data = display_data.rename(
-    columns={
-        "frequency_zone": "주파수권역",
-        "period_no": "시간대 번호",
-        "period_start": "시작시간",
-        "procurement_volume": "모집량 (MW)",
-        "bid_volume": "입찰량 (MW)",
-        "awarded_volume": "낙찰량 (MW)",
-        "avg_price": "평균 낙찰가격",
-        "max_price": "최고 낙찰가격",
-        "min_price": "최저 낙찰가격",
-        "bid_coverage_ratio": "입찰경쟁률 (배)",
-        "procurement_rate": "조달률",
-        "award_rate": "입찰 대비 낙찰률",
-        "excess_bid_volume": "초과입찰량 (MW)",
-        "shortage_volume": "미조달량 (MW)",
-    }
-)
-
-with tab_zone.expander("지표 설명"):
-    st.markdown(
-        """
-- 모집량: EPRX가 해당 시간대에 확보하려고 공고한 1차 조정력 물량
-- 입찰량: 시장 참여자가 제공할 수 있다고 제출한 전체 물량
-- 낙찰량: 실제 거래를 통해 선정된 물량
-- 입찰경쟁률: 입찰량 ÷ 모집량
-- 조달률: 낙찰량 ÷ 모집량
-- 입찰 대비 낙찰률: 낙찰량 ÷ 입찰량
-- 초과입찰량: 입찰량 − 모집량
-- 미조달량: 모집량 − 낙찰량과 0 중 큰 값
-- 가중평균 낙찰가격: 지역별 평균 낙찰가격을 낙찰량으로 가중한 가격
-
-일부 원본 EPRX 데이터에서는 낙찰량이 모집량보다 많은 시간대가 나타날 수 있습니다.
-앱은 원본 EPRX 값을 수정하지 않고 그대로 표시합니다.
-"""
-    )
-
-tab_zone.dataframe(
-    display_data.style.format(
-        {
-            "모집량 (MW)": "{:,.2f}",
-            "입찰량 (MW)": "{:,.2f}",
-            "낙찰량 (MW)": "{:,.2f}",
-            "평균 낙찰가격": "{:,.2f}",
-            "최고 낙찰가격": "{:,.2f}",
-            "최저 낙찰가격": "{:,.2f}",
-            "입찰경쟁률 (배)": "{:.2f}배",
-            "조달률": "{:.2%}",
-            "입찰 대비 낙찰률": "{:.2%}",
-            "초과입찰량 (MW)": "{:,.2f}",
-            "미조달량 (MW)": "{:,.2f}",
-        },
-        na_rep="확인 불가",
-    ),
-    width="stretch",
-)
-
-if data_source == DATA_SOURCE_ACTUAL:
-    show_diagnostics(
-        file_summary, error_data, regional_profile, target=tab_zone
-    )
-
-with tab_zone.expander("권역 구성 보기"):
-    for zone, areas in AREAS_BY_ZONE.items():
-        note = " (홋카이도 별도 계통 특성은 향후 검토)" if zone == "50Hz" else ""
-        displayed_areas = [DISPLAY_AREA_NAMES.get(area, area) for area in areas]
-        st.write(f"{zone}: {', '.join(displayed_areas)}{note}")
-
 render_regional_analysis(
     tab_regional,
     data,
@@ -1752,3 +1620,16 @@ render_regional_analysis(
     week_days[selected_week],
     price_units,
 )
+
+show_eprx_source_information(
+    data_source, data, file_summary, price_units, volume_units
+)
+if data_source == DATA_SOURCE_ACTUAL:
+    show_diagnostics(
+        file_summary,
+        error_data,
+        regional_profile,
+        title="EPRX 데이터 품질 및 파일 진단",
+        deployment_directory=DATA_DIRECTORY,
+        deployment_signatures=signatures,
+    )

@@ -9,18 +9,31 @@ def test_market_selector_eprx_default_and_jepx_weekly_tabs():
     assert app.radio[0].key == "market_selector"
     assert app.radio[0].value == "EPRX 조정력시장"
     assert [tab.label for tab in app.tabs] == [
-        "주파수권역 분석",
         "도쿄·중부 상세분석",
         "전국 시장 요약",
     ]
     assert any(box.key == "eprx_data_source" for box in app.selectbox)
     assert any(box.key == "eprx_analysis_week" for box in app.selectbox)
+    week_box = next(box for box in app.selectbox if box.key == "eprx_analysis_week")
+    assert str(week_box.value.date()) == "2026-07-13"
+    assert any("2026-07-20" in str(value) for value in week_box.options)
+    assert not any(item.key == "frequency_zone_view_mode" for item in app.radio)
+    expander_labels = [item.label for item in app.expander]
+    assert "데이터 출처 및 원본 파일 정보" in expander_labels
+    assert "EPRX 데이터 품질 및 파일 진단" in expander_labels
+    assert expander_labels.index("데이터 출처 및 원본 파일 정보") < expander_labels.index(
+        "EPRX 데이터 품질 및 파일 진단"
+    )
 
     next(
         box for box in app.selectbox if box.key == "eprx_data_source"
     ).set_value("샘플 데이터").run()
     assert not app.exception
-    assert len(app.tabs) == 3
+    assert len(app.tabs) == 2
+    assert any(
+        "현재 가상 샘플 데이터를 사용하고 있습니다" in warning.value
+        for warning in app.warning
+    )
 
     app.radio[0].set_value("JEPX 현물시장").run()
     assert not app.exception
