@@ -55,11 +55,8 @@ from utils.national_charts import (
     regional_volume_bar,
 )
 from utils.regional_charts import (
-    area_bid_coverage_chart,
-    area_price_chart,
-    area_price_range_chart,
-    area_procurement_rate_chart,
-    area_volume_chart,
+    area_award_rate_chart,
+    area_max_price_chart,
 )
 from utils.summary_display import (
     build_national_summary_data,
@@ -1087,38 +1084,36 @@ def render_regional_analysis(
     over_rate = profile.loc[profile["procurement_rate"] > 1]
 
     target.subheader("주간 핵심지표 비교")
-    kpi_display = kpi_table.copy().astype(object)
-    percent_rows = {"조달률 (%)", "입찰 대비 낙찰률 (%)"}
-    times_rows = {"입찰경쟁률 (배)"}
-    integer_rows = {"미조달 시간대 수"}
-    for row in kpi_table.index:
-        for column in kpi_table.columns:
-            value = kpi_table.loc[row, column]
+    excluded_kpi_rows = {
+        "입찰경쟁률 (배)",
+        "조달률 (%)",
+        "평균 가격범위",
+        "미조달 시간대 수",
+        "평균 미조달량 (MW)",
+    }
+    kpi_display = kpi_table.drop(
+        index=list(excluded_kpi_rows), errors="ignore"
+    ).drop(columns=["중부−도쿄 차이"], errors="ignore").astype(object)
+    percent_rows = {"입찰 대비 낙찰률 (%)"}
+    for row in kpi_display.index:
+        for column in kpi_display.columns:
+            value = kpi_display.loc[row, column]
             if pd.isna(value):
                 formatted = "계산 불가"
             elif row in percent_rows:
                 formatted = f"{value:.2%}"
-            elif row in times_rows:
-                formatted = f"{value:.2f}배"
-            elif row in integer_rows:
-                formatted = f"{value:+.0f}" if "차이" in column else f"{value:.0f}"
             else:
-                formatted = f"{value:+,.2f}" if "차이" in column else f"{value:,.2f}"
+                formatted = f"{value:,.2f}"
             kpi_display.loc[row, column] = formatted
     kpi_display = kpi_display.rename(
         index={
             "평균 모집량 (MW)": "평균 모집량 (TSO별, MW)",
             "평균 입찰량 (MW)": "평균 입찰량 (전원 소재지별, MW)",
             "평균 낙찰량 (MW)": "평균 낙찰량 (전원 소재지별, MW)",
-            "입찰경쟁률 (배)": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
-            "조달률 (%)": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량, %)",
             "입찰 대비 낙찰률 (%)": "입찰 대비 낙찰률 (전원 소재지별, %)",
             "평균 낙찰가격": f"평균 낙찰가격 (전원 소재지별, {price_unit})",
             "최고 낙찰가격": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
             "최저 낙찰가격": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
-            "평균 가격범위": f"평균 가격범위 (전원 소재지별, {price_unit})",
-            "미조달 시간대 수": "미조달 시간대 수 (TSO별 모집량 대비 소재지별 낙찰량)",
-            "평균 미조달량 (MW)": "평균 미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)",
         }
     )
     render_hierarchical_metric_table(target, kpi_display)
@@ -1140,33 +1135,20 @@ def render_regional_analysis(
             len(source_over),
         )
 
+    target.caption("전원 소재지별 최고 낙찰가격")
     target.plotly_chart(
-        area_price_chart(profile, visible_areas, price_unit), width="stretch"
+        area_max_price_chart(profile, visible_areas, price_unit), width="stretch"
     )
+    target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
     target.plotly_chart(
-        area_price_range_chart(profile, visible_areas, price_unit), width="stretch"
-    )
-    target.subheader("도쿄·중부 물량 프로파일")
-    if len(visible_areas) == 2:
-        columns = target.columns(2)
-        for column, area in zip(columns, visible_areas):
-            column.plotly_chart(
-                area_volume_chart(profile, area), width="stretch"
-            )
-    else:
-        target.plotly_chart(
-            area_volume_chart(profile, visible_areas[0]), width="stretch"
-        )
-    target.plotly_chart(
-        area_bid_coverage_chart(profile, visible_areas), width="stretch"
-    )
-    target.plotly_chart(
-        area_procurement_rate_chart(profile, visible_areas), width="stretch"
+        area_award_rate_chart(profile, visible_areas), width="stretch"
     )
 
     target.subheader("전주 대비 변화")
     if not previous.empty:
-        previous_display = previous.copy()
+        previous_display = previous.loc[
+            ~previous["지표"].isin(excluded_kpi_rows)
+        ].copy()
         previous_display["현재 주"] = previous_display["현재 주"].map(
             lambda value: "계산 불가" if pd.isna(value) else f"{value:,.2f}"
         )
@@ -1211,12 +1193,8 @@ def render_regional_analysis(
             "max_price",
             "avg_price",
             "min_price",
-            "price_range",
-            "bid_coverage_ratio",
-            "procurement_rate",
             "award_rate",
             "excess_bid_volume",
-            "shortage_volume",
             "observation_count",
             "completeness_flag",
         ]
@@ -1231,12 +1209,8 @@ def render_regional_analysis(
             "max_price": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
             "avg_price": f"평균 낙찰가격 (전원 소재지별, {price_unit})",
             "min_price": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
-            "price_range": f"가격 범위 (전원 소재지별, {price_unit})",
-            "bid_coverage_ratio": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
-            "procurement_rate": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
             "award_rate": "입찰 대비 낙찰률 (전원 소재지별)",
             "excess_bid_volume": "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)",
-            "shortage_volume": "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)",
             "observation_count": "관측일수",
             "completeness_flag": "데이터 완전성",
         }
@@ -1249,12 +1223,8 @@ def render_regional_analysis(
             f"최고 낙찰가격 (전원 소재지별, {price_unit})": f"최고 낙찰가격 ({price_unit})",
             f"평균 낙찰가격 (전원 소재지별, {price_unit})": f"평균 낙찰가격 ({price_unit})",
             f"최저 낙찰가격 (전원 소재지별, {price_unit})": f"최저 낙찰가격 ({price_unit})",
-            f"가격 범위 (전원 소재지별, {price_unit})": f"가격 범위 ({price_unit})",
-            "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "입찰경쟁률 (배)",
-            "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "조달률",
             "입찰 대비 낙찰률 (전원 소재지별)": "입찰 대비 낙찰률",
             "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)": "초과입찰량 (MW)",
-            "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)": "미조달량 (MW)",
         }
     )
     target.caption(
@@ -1270,12 +1240,8 @@ def render_regional_analysis(
                 f"최고 낙찰가격 ({price_unit})": "{:,.2f}",
                 f"평균 낙찰가격 ({price_unit})": "{:,.2f}",
                 f"최저 낙찰가격 ({price_unit})": "{:,.2f}",
-                f"가격 범위 ({price_unit})": "{:,.2f}",
-                "입찰경쟁률 (배)": "{:.2f}배",
-                "조달률": "{:.2%}",
                 "입찰 대비 낙찰률": "{:.2%}",
                 "초과입찰량 (MW)": "{:,.2f}",
-                "미조달량 (MW)": "{:,.2f}",
             },
             na_rep="계산 불가",
         ),
@@ -1714,21 +1680,8 @@ if not incomplete.empty:
         f"7개 미만 관측값을 가진 지역·시간대가 {len(incomplete)}개 있습니다."
     )
 
-tab_regional, tab_national = st.tabs(
-    ["도쿄·중부 상세분석", "전국 시장 요약"]
-)
-render_national_overview(
-    tab_national,
-    data,
-    selected_week,
-    week_days[selected_week],
-    regional_profile,
-    price_units,
-    volume_units,
-    file_summary,
-)
 render_regional_analysis(
-    tab_regional,
+    st,
     data,
     selected_week,
     week_days[selected_week],
