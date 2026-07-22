@@ -105,6 +105,59 @@ DISPLAY_AREA_NAMES = {
 }
 
 
+def deployment_file_diagnostics(
+    label: str, directory: Path, signatures: tuple[tuple[str, int, int], ...]
+) -> pd.DataFrame:
+    """민감한 절대경로 없이 배포 데이터 파일 존재·읽기 상태를 표시합니다."""
+    rows = []
+    for file_path, _, file_size in signatures:
+        path = Path(file_path)
+        try:
+            with path.open("rb") as stream:
+                stream.read(1)
+            readable = "성공"
+        except OSError as exc:
+            readable = f"실패 ({type(exc).__name__})"
+        rows.append(
+            {
+                "시장": label,
+                "프로젝트 기준 디렉터리": ".",
+                "탐색 경로": directory.relative_to(BASE_DIR).as_posix(),
+                "폴더 존재": directory.is_dir(),
+                "발견 파일 수": len(signatures),
+                "파일명": path.name,
+                "확장자": path.suffix.lower(),
+                "파일 크기 (바이트)": file_size,
+                "파일 읽기": readable,
+            }
+        )
+    if not rows:
+        rows.append(
+            {
+                "시장": label,
+                "프로젝트 기준 디렉터리": ".",
+                "탐색 경로": directory.relative_to(BASE_DIR).as_posix(),
+                "폴더 존재": directory.is_dir(),
+                "발견 파일 수": 0,
+                "파일명": "없음",
+                "확장자": "EPRX: .csv/.xlsx/.xls | JEPX: .csv",
+                "파일 크기 (바이트)": 0,
+                "파일 읽기": "대상 없음",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def show_deployment_file_diagnostics(
+    label: str, directory: Path, signatures: tuple[tuple[str, int, int], ...]
+) -> None:
+    with st.expander(f"{label} 배포 파일 진단"):
+        st.dataframe(
+            deployment_file_diagnostics(label, directory, signatures),
+            width="stretch",
+        )
+
+
 def display_price_unit(unit: str) -> str:
     """원본 가격 단위를 화면용 한국어 표기로 변환합니다."""
     return unit.replace("円", "엔").replace("・", "·").replace("分", "분")
@@ -1147,12 +1200,15 @@ def render_jepx_market_placeholder() -> None:
             "JEPX 원본 파일을 정상적으로 읽지 못했습니다. "
             "아래 파일 진단에서 원인을 확인하세요."
             if discovered
-            else "data/jepx/raw 폴더에 지원 가능한 JEPX CSV 파일이 없습니다."
+            else "배포 환경에 JEPX 데이터 파일이 없습니다. GitHub 저장소의 "
+            "data/jepx/raw 경로에 지원 파일을 추가하세요."
         )
+        show_deployment_file_diagnostics("JEPX", JEPX_DATA_DIRECTORY, signatures)
     else:
         st.success(
             "실제 JEPX Day-Ahead 파일이 연결되었습니다."
         )
+        show_deployment_file_diagnostics("JEPX", JEPX_DATA_DIRECTORY, signatures)
 
     if not long_data.empty:
         tab_weekly, tab_validation, tab_diagnostics = st.tabs([
@@ -1422,7 +1478,12 @@ if data_source == DATA_SOURCE_ACTUAL:
             st.code(f"{type(exc).__name__}: {exc}")
         st.stop()
     if not signatures:
-        st.error("data/eprx 폴더에 지원 가능한 CSV 또는 엑셀 파일이 없습니다.")
+        st.error(
+            "배포 환경에 EPRX 데이터 파일이 없습니다. GitHub 저장소의 "
+            "data/eprx 경로에 지원 파일을 추가하거나 왼쪽의 데이터 업데이트 "
+            "기능을 사용하세요."
+        )
+        show_deployment_file_diagnostics("EPRX", DATA_DIRECTORY, signatures)
         show_diagnostics(file_summary, error_data)
         st.stop()
     failed = file_summary.loc[~file_summary["success"].fillna(False)]
@@ -1455,6 +1516,7 @@ if data_source == DATA_SOURCE_ACTUAL:
         f"마지막 파일 수정 {latest_modified:%Y-%m-%d %H:%M:%S %Z} | "
         f"가격 단위 {price_units} | 물량 단위 {volume_units} | 데이터 상태 {statuses}"
     )
+    show_deployment_file_diagnostics("EPRX", DATA_DIRECTORY, signatures)
 else:
     data = load_sample_data()
     price_units = "샘플 가격 단위"

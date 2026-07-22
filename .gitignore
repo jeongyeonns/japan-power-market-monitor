@@ -16,6 +16,7 @@ uploads/
 
 # 실제 시장 데이터와 자동 생성 로그는 저장소에 포함하지 않습니다.
 data/eprx/*.csv
+!data/eprx/202607_1-0_prompt.csv
 data/eprx/*.xlsx
 data/eprx/*.xls
 data/eprx/raw/*
@@ -26,5 +27,6 @@ data/eprx/metadata/*.csv
 !data/eprx/.gitkeep
 data/jepx/raw/*
 !data/jepx/raw/.gitkeep
+!data/jepx/raw/spot_summary_2026.csv
 data/jepx/metadata/*
 !data/jepx/metadata/.gitkeep

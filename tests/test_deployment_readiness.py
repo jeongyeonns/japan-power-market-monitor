@@ -28,6 +28,28 @@ def test_empty_and_invalid_files_do_not_raise_uncaught_errors(tmp_path):
     assert not errors.empty or jepx_summary["status"].ne("정상").any()
 
 
+def test_file_discovery_is_case_insensitive_and_independent_of_cwd(tmp_path, monkeypatch):
+    eprx = tmp_path / "data" / "eprx"
+    eprx_raw = eprx / "raw"
+    jepx = tmp_path / "data" / "jepx" / "raw"
+    eprx_raw.mkdir(parents=True)
+    jepx.mkdir(parents=True)
+    (eprx / "market.CSV").write_text("x", encoding="utf-8")
+    (eprx_raw / "market.XLSX").write_text("y", encoding="utf-8")
+    (jepx / "spot.CSV").write_text("x", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    assert [path.name for path in find_eprx_files(eprx)] == [
+        "market.CSV",
+        "market.XLSX",
+    ]
+    assert find_jepx_files(jepx)["file_path"].map(lambda path: path.name).tolist() == [
+        "spot.CSV"
+    ]
+
+
 def test_deployment_files_and_secret_ignores_exist():
     root = Path(__file__).resolve().parents[1]
     assert (root / "runtime.txt").read_text(encoding="utf-8").strip() == "python-3.14"
@@ -35,3 +57,5 @@ def test_deployment_files_and_secret_ignores_exist():
     ignores = (root / ".gitignore").read_text(encoding="utf-8")
     for entry in (".streamlit/secrets.toml", ".env", ".pytest_cache/", "data/jepx/raw/*"):
         assert entry in ignores
+    assert "!data/eprx/202607_1-0_prompt.csv" in ignores
+    assert "!data/jepx/raw/spot_summary_2026.csv" in ignores

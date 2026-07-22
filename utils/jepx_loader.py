@@ -339,7 +339,8 @@ def load_all_jepx_data(
         digest = _sha256(path)
         summary: dict[str, Any] = {
             "file_name": path.name,
-            "file_path": str(path.resolve()),
+            # 서버나 로컬 사용자의 절대경로를 진단 화면에 노출하지 않습니다.
+            "file_path": path.name,
             "file_size": int(file_info["file_size"]),
             "modified_at": file_info["modified_at"],
             "sha256": digest,
