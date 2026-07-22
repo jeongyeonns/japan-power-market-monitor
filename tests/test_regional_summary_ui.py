@@ -28,11 +28,16 @@ def test_regional_summary_ui_is_not_rendered_but_helpers_are_retained():
         and node.name == "render_regional_summary"
         for node in tree.body
     )
-    assert "render_national_summary" in {
+    assert "render_national_summary" not in {
         node.func.id
         for node in ast.walk(_function(tree, "render_national_overview"))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
+    assert any(
+        isinstance(node, ast.FunctionDef)
+        and node.name == "render_national_summary"
+        for node in tree.body
+    )
 
 
 def test_weekly_kpis_are_the_first_regional_analysis_subheader():

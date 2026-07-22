@@ -48,6 +48,65 @@ def area_price_chart(
     return _finish(figure, f"평균 낙찰가격 (전원 소재지별, {price_unit})")
 
 
+def area_max_price_chart(
+    profile: pd.DataFrame, areas: list[str], price_unit: str
+) -> go.Figure:
+    data = _display_data(profile, areas)
+    figure = px.line(
+        data,
+        x="period_start",
+        y="max_price",
+        color="지역",
+        category_orders={"period_start": PERIOD_ORDER},
+        color_discrete_map=AREA_COLORS,
+        title="도쿄·중부 시간대별 최고 낙찰가격",
+        labels={
+            "period_start": "시간대",
+            "max_price": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
+            "지역": "지역",
+        },
+    )
+    figure.update_traces(
+        hovertemplate=(
+            "지역=%{fullData.name}<br>시간대=%{x}<br>"
+            f"최고 낙찰가격(전원 소재지별)=%{{y:,.2f}} {price_unit}"
+            "<extra></extra>"
+        )
+    )
+    return _finish(figure, f"최고 낙찰가격 (전원 소재지별, {price_unit})")
+
+
+def area_award_rate_chart(
+    profile: pd.DataFrame, areas: list[str]
+) -> go.Figure:
+    data = _display_data(profile, areas)
+    figure = px.line(
+        data,
+        x="period_start",
+        y="award_rate",
+        color="지역",
+        custom_data=["bid_volume", "awarded_volume"],
+        category_orders={"period_start": PERIOD_ORDER},
+        color_discrete_map=AREA_COLORS,
+        title="도쿄·중부 입찰 대비 낙찰률",
+        labels={
+            "period_start": "시간대",
+            "award_rate": "입찰 대비 낙찰률 (전원 소재지별, %)",
+            "지역": "지역",
+        },
+    )
+    figure.update_traces(
+        hovertemplate=(
+            "지역=%{fullData.name}<br>시간대=%{x}<br>"
+            "입찰량(전원 소재지별)=%{customdata[0]:,.2f} MW<br>"
+            "낙찰량(전원 소재지별)=%{customdata[1]:,.2f} MW<br>"
+            "입찰 대비 낙찰률=%{y:.2%}<extra></extra>"
+        )
+    )
+    figure.update_yaxes(tickformat=".0%")
+    return _finish(figure, "입찰 대비 낙찰률 (전원 소재지별, %)")
+
+
 def area_price_range_chart(
     profile: pd.DataFrame, areas: list[str], price_unit: str
 ) -> go.Figure:
