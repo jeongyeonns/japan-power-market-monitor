@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -35,6 +37,18 @@ ANALYSIS_WEEK_HELP_TEXT = (
     "분석하려는 주차를 선택해 주세요. "
     "정확한 비교를 위해 ‘데이터 완전’으로 표시된 주차를 권장합니다."
 )
+JEPX_AREA_DISPLAY_ORDER = {
+    "System": 0,
+    "Hokkaido": 1,
+    "Tohoku": 2,
+    "Tokyo": 3,
+    "Chubu": 4,
+    "Hokuriku": 5,
+    "Kansai": 6,
+    "Shikoku": 7,
+    "Chugoku": 8,
+    "Kyushu": 9,
+}
 
 
 def render_jepx_validation(long_data, spread_results_provider, area_names):
@@ -73,6 +87,47 @@ def render_jepx_diagnostics(long_data, wide_data, errors, warnings, file_summary
 
 def _fmt(value):
     return "계산 불가" if pd.isna(value) else f"{value:,.2f}"
+
+
+def _render_metric_hierarchy_table(data: pd.DataFrame) -> None:
+    """JEPX 비교표의 지표 본문과 괄호 설명을 분리해 표시합니다."""
+    display = data.reset_index(names="지표")
+    headers = "".join(f"<th>{escape(str(column))}</th>" for column in display.columns)
+    body = []
+    for _, row in display.iterrows():
+        label = str(row["지표"])
+        boundary = label.find(" (")
+        if boundary < 0:
+            label_html = f'<span class="jepx-metric-main">{escape(label)}</span>'
+        else:
+            label_html = (
+                f'<span class="jepx-metric-main">{escape(label[:boundary])}</span>'
+                f'<span class="jepx-metric-sub">{escape(label[boundary + 1:])}</span>'
+            )
+        values = "".join(
+            f'<td class="jepx-metric-value">{escape(str(row[column]))}</td>'
+            for column in display.columns[1:]
+        )
+        body.append(f'<tr><td class="jepx-metric-name">{label_html}</td>{values}</tr>')
+    st.markdown(
+        """
+<style>
+.jepx-metric-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.jepx-metric-table th, .jepx-metric-table td {
+  padding: 0.45rem 0.6rem; border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+.jepx-metric-table th { text-align: right; font-weight: 600; }
+.jepx-metric-table th:first-child, .jepx-metric-name { text-align: left; }
+.jepx-metric-value { text-align: right; font-variant-numeric: tabular-nums; }
+.jepx-metric-main { color: inherit; font-size: 0.95rem; font-weight: 500; }
+.jepx-metric-sub { color: #8a8f98; font-size: 0.75rem; font-weight: 400; margin-left: 0.25rem; }
+@media (max-width: 700px) { .jepx-metric-sub { display: block; margin-left: 0; } }
+</style>
+"""
+        + f'<table class="jepx-metric-table"><thead><tr>{headers}</tr></thead>'
+        + f"<tbody>{''.join(body)}</tbody></table>",
+        unsafe_allow_html=True,
+    )
 
 
 def _jepx_week_options(long_data):
@@ -155,10 +210,7 @@ def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_na
         ("평균 충전가격 (엔/kWh)", "average_charge_price", "number"),
         ("평균 방전가격 (엔/kWh)", "average_discharge_price", "number"),
         ("평균 ESS 스프레드 (엔/kWh)", "average_spread", "number"),
-        ("최대 ESS 스프레드 (엔/kWh)", "maximum_spread", "number"),
         ("최대 스프레드 발생일", "maximum_spread_date", "date"),
-        ("양의 스프레드 일수", "positive_spread_days", "integer"),
-        ("완전 데이터 일수", "complete_days", "integer"),
         ("전주 대비 평균 스프레드 변화 (엔/kWh)", "week_over_week_change", "change"),
     ]
     core = pd.DataFrame(index=[label for label, _, _ in rows])
@@ -177,7 +229,7 @@ def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_na
                 value = _fmt(value)
             values.append(value)
         core[area_names.get(area, area)] = values
-    st.dataframe(core, width="stretch")
+    _render_metric_hierarchy_table(core)
 
     incomplete = weekly[
         weekly["completeness_flag"].ne("Complete")
@@ -375,7 +427,14 @@ def render_jepx_weekly_monitor(long_data, spread_results_provider, area_names):
            else "- **전주 대비:** 비교 가능한 데이터가 없습니다.")
     )
 
-    table = comparison.copy()
+    table = comparison.assign(
+        _area_order=comparison["area"].map(JEPX_AREA_DISPLAY_ORDER),
+        _area_name=comparison["area"].astype(str),
+    ).sort_values(
+        ["_area_order", "_area_name"],
+        ascending=[True, True],
+        na_position="last",
+    ).drop(columns=["_area_order", "_area_name"])
     table["지역"] = table["area"].map(area_names).fillna(table["area"])
     table["전주 대비 변화 (엔/kWh)"] = table["week_over_week_change"].map(format_spread_change)
     table["최대 스프레드 발생일"] = pd.to_datetime(table["maximum_spread_date"]).dt.strftime("%Y-%m-%d").fillna("계산 불가")
