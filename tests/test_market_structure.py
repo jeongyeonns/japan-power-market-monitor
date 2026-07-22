@@ -12,8 +12,8 @@ ANALYSIS_WEEK_HELP_TEXT = (
 def test_market_selector_eprx_default_and_jepx_weekly_tabs():
     app = AppTest.from_file("app.py", default_timeout=60).run()
     assert not app.exception
-    assert app.radio[0].key == "market_selector"
-    assert app.radio[0].value == "EPRX 조정력시장"
+    assert app.segmented_control[0].key == "market_selector"
+    assert app.segmented_control[0].value == "EPRX 조정력시장"
     assert [tab.label for tab in app.tabs] == [
         "도쿄·중부 상세분석",
         "전국 시장 요약",
@@ -44,23 +44,27 @@ def test_market_selector_eprx_default_and_jepx_weekly_tabs():
         for warning in app.warning
     )
 
-    app.radio[0].set_value("JEPX 현물시장").run()
+    app.segmented_control[0].set_value("JEPX 현물시장").run()
     assert not app.exception
     assert [tab.label for tab in app.tabs] == [
         "도쿄·중부 분석",
         "전국 주간 모니터링",
-        "계산 검증",
-        "데이터 품질 및 파일 진단",
     ]
     visible_text = "\n".join(
         [element.value for element in app.header]
         + [element.value for element in app.subheader]
         + [element.value for element in app.info]
         + [element.value for element in app.success]
+        + [element.value for element in app.caption]
         + [element.value for element in app.markdown]
     )
     assert "JEPX Day-Ahead 현물가격 및 ESS 스프레드 분석" in visible_text
-    assert "실제 JEPX Day-Ahead 파일이 연결되었습니다" in visible_text
+    assert "JEPX 데이터 연결 상태" not in visible_text
+    assert "실제 JEPX Day-Ahead 파일이 연결되어 있습니다" not in visible_text
+    assert not any(
+        "실제 JEPX Day-Ahead 파일" in item.value for item in app.success
+    )
+    assert not any(item.label == "JEPX 배포 파일 진단" for item in app.expander)
     assert any(box.key == "jepx_tokyo_chubu_week" for box in app.selectbox)
     assert any(box.key == "jepx_tokyo_chubu_duration" for box in app.selectbox)
     assert any(box.key == "jepx_tokyo_chubu_operation_mode" for box in app.selectbox)
@@ -71,7 +75,7 @@ def test_market_selector_eprx_default_and_jepx_weekly_tabs():
     assert any(box.key == "jepx_weekly_area" for box in app.selectbox)
     assert any(box.key == "jepx_weekly_duration" for box in app.selectbox)
     assert any(box.key == "jepx_weekly_mode" for box in app.selectbox)
-    assert any(box.key == "jepx_validation_date" for box in app.selectbox)
+    assert not any(box.key == "jepx_validation_date" for box in app.selectbox)
     daily_areas = next(
         box for box in app.multiselect
         if box.key == "jepx_daily_spread_selected_areas"

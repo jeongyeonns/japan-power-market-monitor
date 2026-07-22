@@ -80,7 +80,7 @@ st.set_page_config(
     page_title="일본 전력시장 모니터링",
     page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -734,6 +734,52 @@ def render_hierarchical_metric_table(
     )
 
 
+def render_national_regional_table(
+    target, regional_summary: pd.DataFrame, price_unit: str
+) -> None:
+    """전국 탭의 지역별 주간 비교표를 짧은 헤더로 표시합니다."""
+    region_display = regional_summary.rename(
+        columns={
+            "area_display": "지역", "frequency_zone": "주파수권역",
+            "avg_procurement_volume": "평균 모집량 (MW)",
+            "avg_bid_volume": "평균 입찰량 (MW)",
+            "avg_awarded_volume": "평균 낙찰량 (MW)",
+            "bid_coverage_ratio": "입찰경쟁률 (배)",
+            "procurement_rate": "조달률", "award_rate": "입찰 대비 낙찰률",
+            "weighted_avg_price": f"낙찰량 가중평균 낙찰가격 ({price_unit})",
+            "max_price": f"최고 낙찰가격 ({price_unit})",
+            "min_price": f"최저 낙찰가격 ({price_unit})",
+            "shortage_period_count": "미조달 시간대 수",
+            "max_shortage_volume": "최대 미조달량 (MW)",
+            "observed_period_count": "관측 시간대 수",
+            "completeness_flag": "데이터 완전성",
+        }
+    )
+    region_display["데이터 완전성"] = region_display["데이터 완전성"].replace(
+        {"Complete": "데이터 완전", "Incomplete": "데이터 불완전"}
+    )
+    target.subheader("지역별 주간 요약")
+    target.caption(
+        "데이터 기준: 모집량은 TSO별, 입찰량·낙찰량·낙찰가격은 전원 소재지별입니다. "
+        "입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다."
+    )
+    target.dataframe(
+        region_display.drop(columns=["area"]).style.format(
+            {
+                "평균 모집량 (MW)": "{:,.2f}", "평균 입찰량 (MW)": "{:,.2f}",
+                "평균 낙찰량 (MW)": "{:,.2f}", "입찰경쟁률 (배)": "{:.2f}배",
+                "조달률": "{:.2%}", "입찰 대비 낙찰률": "{:.2%}",
+                f"낙찰량 가중평균 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"최고 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"최저 낙찰가격 ({price_unit})": "{:,.2f}",
+                "최대 미조달량 (MW)": "{:,.2f}",
+            },
+            na_rep="계산 불가",
+        ),
+        width="stretch",
+    )
+
+
 def render_national_overview(
     target,
     data: pd.DataFrame,
@@ -753,10 +799,9 @@ def render_national_overview(
     national = create_national_weekly_profile(regional_profile)
     kpis = calculate_national_kpis(national, regional_profile)
     regional_summary = create_regional_market_summary(regional_profile)
-    for message in validate_national_profile(
+    national_validation_messages = validate_national_profile(
         national, regional_profile, selected_week_days
-    ):
-        target.warning(message)
+    )
     target.info(
         "전국 시장 요약은 일본 9개 지역의 1차 조정력 공표자료를 합산한 "
         "참고지표입니다. 물량은 지역별 합계이며, 전국 평균가격은 지역별 평균 "
@@ -867,6 +912,7 @@ def render_national_overview(
     price_columns[1].plotly_chart(
         regional_bid_bar(regional_summary), width="stretch"
     )
+    render_national_regional_table(target, regional_summary, price_unit)
 
     target.subheader("전국 시간대별 상세 데이터")
     detailed = national.copy()
@@ -921,70 +967,48 @@ def render_national_overview(
                 "누락 지역",
                 "데이터 완전성",
             ]
-        ]
+        ].rename(
+            columns={
+                "모집량 (TSO별, MW)": "모집량 (MW)",
+                "입찰량 (전원 소재지별, MW)": "입찰량 (MW)",
+                "낙찰량 (전원 소재지별, MW)": "낙찰량 (MW)",
+                f"가중평균 낙찰가격 (전원 소재지별, {price_unit})": f"가중평균 낙찰가격 ({price_unit})",
+                f"최고 낙찰가격 (전원 소재지별, {price_unit})": f"최고 낙찰가격 ({price_unit})",
+                f"최저 낙찰가격 (전원 소재지별, {price_unit})": f"최저 낙찰가격 ({price_unit})",
+                "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "입찰경쟁률 (배)",
+                "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "조달률",
+                "입찰 대비 낙찰률 (전원 소재지별)": "입찰 대비 낙찰률",
+                "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)": "초과입찰량 (MW)",
+                "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)": "미조달량 (MW)",
+            }
+        )
+    target.caption(
+        "데이터 기준: 모집량은 TSO별, 입찰량·낙찰량·낙찰가격은 전원 소재지별입니다. "
+        "입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다."
+    )
     target.dataframe(
         detailed_display.style.format(
             {
-                "모집량 (TSO별, MW)": "{:,.2f}",
-                "입찰량 (전원 소재지별, MW)": "{:,.2f}",
-                "낙찰량 (전원 소재지별, MW)": "{:,.2f}",
-                f"가중평균 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
-                f"최고 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
-                f"최저 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
+                "모집량 (MW)": "{:,.2f}",
+                "입찰량 (MW)": "{:,.2f}",
+                "낙찰량 (MW)": "{:,.2f}",
+                f"가중평균 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"최고 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"최저 낙찰가격 ({price_unit})": "{:,.2f}",
                 "가격 범위": "{:,.2f}",
-                "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "{:.2f}배",
-                "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "{:.2%}",
-                "입찰 대비 낙찰률 (전원 소재지별)": "{:.2%}",
-                "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)": "{:,.2f}",
-                "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)": "{:,.2f}",
+                "입찰경쟁률 (배)": "{:.2f}배",
+                "조달률": "{:.2%}",
+                "입찰 대비 낙찰률": "{:.2%}",
+                "초과입찰량 (MW)": "{:,.2f}",
+                "미조달량 (MW)": "{:,.2f}",
             },
             na_rep="계산 불가",
         ),
         width="stretch",
     )
 
-    target.subheader("지역별 주간 요약")
-    region_display = regional_summary.rename(
-        columns={
-            "area_display": "지역",
-            "frequency_zone": "주파수권역",
-            "avg_procurement_volume": "평균 모집량 (TSO별, MW)",
-            "avg_bid_volume": "평균 입찰량 (전원 소재지별, MW)",
-            "avg_awarded_volume": "평균 낙찰량 (전원 소재지별, MW)",
-            "bid_coverage_ratio": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
-            "procurement_rate": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
-            "award_rate": "입찰 대비 낙찰률 (전원 소재지별)",
-            "weighted_avg_price": f"낙찰량 가중평균 낙찰가격 (전원 소재지별, {price_unit})",
-            "max_price": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
-            "min_price": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
-            "shortage_period_count": "미조달 시간대 수",
-            "max_shortage_volume": "최대 미조달량 (MW)",
-            "observed_period_count": "관측 시간대 수",
-            "completeness_flag": "데이터 완전성",
-        }
-    )
-    region_display["데이터 완전성"] = region_display["데이터 완전성"].replace(
-        {"Complete": "데이터 완전", "Incomplete": "데이터 불완전"}
-    )
-    target.dataframe(
-        region_display.drop(columns=["area"]).style.format(
-            {
-                "평균 모집량 (TSO별, MW)": "{:,.2f}",
-                "평균 입찰량 (전원 소재지별, MW)": "{:,.2f}",
-                "평균 낙찰량 (전원 소재지별, MW)": "{:,.2f}",
-                "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "{:.2f}배",
-                "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "{:.2%}",
-                "입찰 대비 낙찰률 (전원 소재지별)": "{:.2%}",
-                f"낙찰량 가중평균 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
-                f"최고 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
-                f"최저 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
-                "최대 미조달량 (MW)": "{:,.2f}",
-            },
-            na_rep="계산 불가",
-        ),
-        width="stretch",
-    )
-
+    for message in national_validation_messages:
+        target.warning(message)
     if not national_over.empty:
         render_excess_award_warning(
             target,
@@ -1009,6 +1033,9 @@ def render_national_overview(
 - 전국 요약은 시장 규모 파악용이며, 지역 비교는 권역 및 상세분석 탭을 이용
 
 **본 앱의 낙찰가격은 전원 소재지별 공표값을 사용합니다.**
+
+모집량은 TSO별 공표값을 사용하며, 입찰량·낙찰량·낙찰가격은 전원 소재지별 공표값을 사용합니다.
+입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다.
 """
         )
 
@@ -1214,22 +1241,41 @@ def render_regional_analysis(
             "completeness_flag": "데이터 완전성",
         }
     )
-    target.caption(f"가격 단위: {price_unit}")
+    detailed = detailed.rename(
+        columns={
+            "모집량 (TSO별, MW)": "모집량 (MW)",
+            "입찰량 (전원 소재지별, MW)": "입찰량 (MW)",
+            "낙찰량 (전원 소재지별, MW)": "낙찰량 (MW)",
+            f"최고 낙찰가격 (전원 소재지별, {price_unit})": f"최고 낙찰가격 ({price_unit})",
+            f"평균 낙찰가격 (전원 소재지별, {price_unit})": f"평균 낙찰가격 ({price_unit})",
+            f"최저 낙찰가격 (전원 소재지별, {price_unit})": f"최저 낙찰가격 ({price_unit})",
+            f"가격 범위 (전원 소재지별, {price_unit})": f"가격 범위 ({price_unit})",
+            "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "입찰경쟁률 (배)",
+            "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "조달률",
+            "입찰 대비 낙찰률 (전원 소재지별)": "입찰 대비 낙찰률",
+            "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)": "초과입찰량 (MW)",
+            "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)": "미조달량 (MW)",
+        }
+    )
+    target.caption(
+        "데이터 기준: 모집량은 TSO별, 입찰량·낙찰량·낙찰가격은 전원 소재지별입니다. "
+        "입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다."
+    )
     target.dataframe(
         detailed.style.format(
             {
-                "모집량 (TSO별, MW)": "{:,.2f}",
-                "입찰량 (전원 소재지별, MW)": "{:,.2f}",
-                "낙찰량 (전원 소재지별, MW)": "{:,.2f}",
-                f"최고 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
-                f"평균 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
-                f"최저 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
-                f"가격 범위 (전원 소재지별, {price_unit})": "{:,.2f}",
-                "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "{:.2f}배",
-                "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "{:.2%}",
-                "입찰 대비 낙찰률 (전원 소재지별)": "{:.2%}",
-                "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)": "{:,.2f}",
-                "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)": "{:,.2f}",
+                "모집량 (MW)": "{:,.2f}",
+                "입찰량 (MW)": "{:,.2f}",
+                "낙찰량 (MW)": "{:,.2f}",
+                f"최고 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"평균 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"최저 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"가격 범위 ({price_unit})": "{:,.2f}",
+                "입찰경쟁률 (배)": "{:.2f}배",
+                "조달률": "{:.2%}",
+                "입찰 대비 낙찰률": "{:.2%}",
+                "초과입찰량 (MW)": "{:,.2f}",
+                "미조달량 (MW)": "{:,.2f}",
             },
             na_rep="계산 불가",
         ),
@@ -1257,6 +1303,9 @@ def render_regional_analysis(
 앱은 원본 EPRX 값을 수정하지 않고 그대로 표시합니다.
 
 **본 앱의 낙찰가격은 전원 소재지별 공표값을 사용합니다.**
+
+모집량은 TSO별 공표값을 사용하며, 입찰량·낙찰량·낙찰가격은 전원 소재지별 공표값을 사용합니다.
+입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다.
 """
         )
 
@@ -1264,18 +1313,15 @@ def render_regional_analysis(
 def render_jepx_market_placeholder() -> None:
     """JEPX 원본 연결 상태와 정규화 진단만 표시합니다."""
     st.header("JEPX Day-Ahead 현물가격 및 ESS 스프레드 분석")
-    st.subheader("JEPX 데이터 연결 상태")
     try:
         signatures = jepx_file_signatures()
         long_data, wide_data, errors, warnings, file_summary = load_jepx_data(
             str(JEPX_DATA_DIRECTORY), signatures
         )
-    except Exception as exc:
+    except Exception:
         st.error(
             "JEPX 데이터를 불러오지 못했습니다. 데이터 폴더와 파일 형식을 확인하세요."
         )
-        with st.expander("JEPX 데이터 로딩 상세 오류"):
-            st.code(f"{type(exc).__name__}: {exc}")
         return
     discovered = len(signatures)
     successful = (
@@ -1285,25 +1331,18 @@ def render_jepx_market_placeholder() -> None:
     )
     if long_data.empty:
         st.error(
-            "JEPX 원본 파일을 정상적으로 읽지 못했습니다. "
-            "아래 파일 진단에서 원인을 확인하세요."
+            "JEPX 원본 파일을 읽지 못했습니다. data/jepx/raw 경로와 "
+            "파일 형식을 확인해 주세요."
             if discovered
             else "배포 환경에 JEPX 데이터 파일이 없습니다. GitHub 저장소의 "
             "data/jepx/raw 경로에 지원 파일을 추가하세요."
         )
-        show_deployment_file_diagnostics("JEPX", JEPX_DATA_DIRECTORY, signatures)
-    else:
-        st.success(
-            "실제 JEPX Day-Ahead 파일이 연결되었습니다."
-        )
-        show_deployment_file_diagnostics("JEPX", JEPX_DATA_DIRECTORY, signatures)
+        return
 
     if not long_data.empty:
-        tab_tokyo_chubu, tab_weekly, tab_validation, tab_diagnostics = st.tabs([
+        tab_tokyo_chubu, tab_weekly = st.tabs([
             "도쿄·중부 분석",
             "전국 주간 모니터링",
-            "계산 검증",
-            "데이터 품질 및 파일 진단",
         ])
 
         def spread_provider(duration: int, mode: str) -> pd.DataFrame:
@@ -1315,10 +1354,6 @@ def render_jepx_market_placeholder() -> None:
             )
         with tab_weekly:
             render_jepx_weekly_monitor(long_data, spread_provider, JEPX_AREA_DISPLAY)
-        with tab_validation:
-            render_jepx_validation(long_data, spread_provider, JEPX_AREA_DISPLAY)
-        with tab_diagnostics:
-            render_jepx_diagnostics(long_data, wide_data, errors, warnings, file_summary)
         return
 
     date_min = long_data["delivery_date"].min() if not long_data.empty else pd.NaT
@@ -1476,12 +1511,39 @@ def render_jepx_market_placeholder() -> None:
 
 st.title("일본 전력시장 모니터링")
 st.caption("EPRX 조정력시장 및 JEPX 현물시장 분석")
-selected_market = st.radio(
-    "시장 선택",
-    ["EPRX 조정력시장", "JEPX 현물시장"],
-    horizontal=True,
-    key="market_selector",
+st.markdown(
+    """
+<style>
+.st-key-market_selector_container { margin: 0.35rem 0 1rem; }
+.st-key-market_selector_container [data-testid="stSegmentedControl"] { width: 100%; }
+.st-key-market_selector_container [data-testid="stSegmentedControl"] > div {
+  display: flex; width: 100%; gap: 0.5rem;
+}
+.st-key-market_selector_container [data-testid="stSegmentedControl"] button {
+  flex: 1 1 50%; min-height: 48px; padding: 0.65rem 1rem;
+  border-radius: 9px; font-size: 1.05rem; font-weight: 600;
+}
+.st-key-market_selector_container [data-testid="stSegmentedControl"] button[aria-pressed="true"],
+.st-key-market_selector_container [data-testid="stSegmentedControl"] button[aria-checked="true"] {
+  background: #d62728; border-color: #d62728; color: #fff;
+}
+@media (max-width: 520px) {
+  .st-key-market_selector_container [data-testid="stSegmentedControl"] button {
+    min-height: 44px; padding: 0.5rem 0.35rem; font-size: 0.92rem;
+  }
+}
+</style>
+""",
+    unsafe_allow_html=True,
 )
+with st.container(key="market_selector_container"):
+    selected_market = st.segmented_control(
+        "분석 시장 선택",
+        ["EPRX 조정력시장", "JEPX 현물시장"],
+        default="EPRX 조정력시장",
+        key="market_selector",
+        width="stretch",
+    )
 
 if selected_market == "JEPX 현물시장":
     render_jepx_market_placeholder()
