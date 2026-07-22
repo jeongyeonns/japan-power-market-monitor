@@ -756,25 +756,28 @@ def render_national_overview(
 
     target.subheader("전국 1차 조정력 시장 핵심지표")
     card_metrics = [
-        ("평균 모집량 (MW)", format_value(kpis["평균 모집량 (MW)"], ",.2f", " MW")),
-        ("평균 입찰량 (MW)", format_value(kpis["평균 입찰량 (MW)"], ",.2f", " MW")),
-        ("평균 낙찰량 (MW)", format_value(kpis["평균 낙찰량 (MW)"], ",.2f", " MW")),
+        ("평균 모집량 (TSO별)", format_value(kpis["평균 모집량 (MW)"], ",.2f", " MW")),
+        ("평균 입찰량 (전원 소재지별)", format_value(kpis["평균 입찰량 (MW)"], ",.2f", " MW")),
+        ("평균 낙찰량 (전원 소재지별)", format_value(kpis["평균 낙찰량 (MW)"], ",.2f", " MW")),
         (
-            "전국 입찰경쟁률",
+            "전국 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량)",
             format_value(kpis["전국 입찰경쟁률 (배)"], ".2f", "배"),
         ),
-        ("전국 조달률", format_value(kpis["전국 조달률 (%)"], ".2%")),
         (
-            "낙찰량 가중평균 낙찰가격 참고값",
+            "전국 조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
+            format_value(kpis["전국 조달률 (%)"], ".2%"),
+        ),
+        (
+            "전국 가중평균 낙찰가격 (전원 소재지별)",
             format_value(
                 kpis["전국 낙찰량 가중평균 낙찰가격"],
                 ",.2f",
                 f" {price_unit}",
             ),
         ),
-        ("주간 모집량 합계", format_value(kpis["주간 모집량 합계"], ",.2f", " MW구간합")),
-        ("주간 입찰량 합계", format_value(kpis["주간 입찰량 합계"], ",.2f", " MW구간합")),
-        ("주간 낙찰량 합계", format_value(kpis["주간 낙찰량 합계"], ",.2f", " MW구간합")),
+        ("주간 모집량 합계 (TSO별)", format_value(kpis["주간 모집량 합계"], ",.2f", " MW구간합")),
+        ("주간 입찰량 합계 (전원 소재지별)", format_value(kpis["주간 입찰량 합계"], ",.2f", " MW구간합")),
+        ("주간 낙찰량 합계 (전원 소재지별)", format_value(kpis["주간 낙찰량 합계"], ",.2f", " MW구간합")),
         (
             "입찰 부족 시간대 수",
             f"{kpis['입찰경쟁률 1.0배 미만 시간대 수']}개",
@@ -782,6 +785,20 @@ def render_national_overview(
         ("미조달 발생 시간대 수", f"{kpis['미조달 발생 시간대 수']}개"),
         ("최대 미조달량", format_value(kpis["최대 미조달량"], ",.2f", " MW")),
     ]
+    metric_help = {
+        "평균 모집량 (TSO별)": "일반송배전사업자(TSO)가 공고한 지역별 모집량의 평균입니다.",
+        "평균 입찰량 (전원 소재지별)": "해당 지역에 위치한 전원들의 입찰량 합계 기준 평균입니다.",
+        "평균 낙찰량 (전원 소재지별)": "해당 지역에 위치한 전원들의 낙찰량 합계 기준 평균입니다.",
+        "전국 가중평균 낙찰가격 (전원 소재지별)": (
+            "전원 소재지별 평균 낙찰가격을 전원 소재지별 낙찰량으로 가중평균한 참고값입니다."
+        ),
+        "전국 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량)": (
+            "서로 다른 지역 귀속 기준의 물량을 사용한 혼합 기준 지표입니다."
+        ),
+        "전국 조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": (
+            "서로 다른 지역 귀속 기준의 물량을 사용한 혼합 기준 지표입니다."
+        ),
+    }
     for start in (0, 6):
         columns = target.columns(6)
         for column, (label, value) in zip(columns, card_metrics[start : start + 6]):
@@ -795,7 +812,7 @@ def render_national_overview(
                     ),
                 )
             else:
-                column.metric(label, value)
+                column.metric(label, value, help=metric_help.get(label))
 
     target.subheader("전주 대비 전국 변화")
     if previous_week is None:
@@ -831,6 +848,16 @@ def render_national_overview(
                 if pd.isna(row["변화율"])
                 else f"{row['변화율']:+.2%}"
             )
+        comparison_display["지표"] = comparison_display["지표"].replace(
+            {
+                "평균 모집량 (MW)": "평균 모집량 (TSO별, MW)",
+                "평균 입찰량 (MW)": "평균 입찰량 (전원 소재지별, MW)",
+                "평균 낙찰량 (MW)": "평균 낙찰량 (전원 소재지별, MW)",
+                "전국 입찰경쟁률 (배)": "전국 입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
+                "전국 조달률 (%)": "전국 조달률 (소재지별 낙찰량 ÷ TSO별 모집량, %)",
+                "전국 낙찰량 가중평균 낙찰가격": "전국 가중평균 낙찰가격 (전원 소재지별)",
+            }
+        )
         target.caption(f"비교 주차: {previous_week:%Y-%m-%d} 시작 주")
         target.dataframe(
             comparison_display.drop(columns=["절대 변화 단위"]),
@@ -839,7 +866,8 @@ def render_national_overview(
 
     target.plotly_chart(national_price_chart(national, price_unit), width="stretch")
     target.caption(
-        "이 가격은 지역별 평균 낙찰가격을 낙찰량으로 가중한 참고값이며, "
+        "이 가격은 전원 소재지별 평균 낙찰가격을 전원 소재지별 낙찰량으로 "
+        "가중한 참고값이며, "
         "전국 공통 단일 낙찰가격이 아닙니다."
     )
     target.plotly_chart(national_volume_chart(national), width="stretch")
@@ -875,18 +903,18 @@ def render_national_overview(
         columns={
             "period_no": "시간대 번호",
             "period_start": "시작시간",
-            "procurement_volume": "모집량 (MW)",
-            "bid_volume": "입찰량 (MW)",
-            "awarded_volume": "낙찰량 (MW)",
-            "avg_price": "가중평균 낙찰가격",
-            "max_price": "최고 낙찰가격",
-            "min_price": "최저 낙찰가격",
+            "procurement_volume": "모집량 (TSO별, MW)",
+            "bid_volume": "입찰량 (전원 소재지별, MW)",
+            "awarded_volume": "낙찰량 (전원 소재지별, MW)",
+            "avg_price": f"가중평균 낙찰가격 (전원 소재지별, {price_unit})",
+            "max_price": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
+            "min_price": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
             "price_range": "가격 범위",
-            "bid_coverage_ratio": "입찰경쟁률 (배)",
-            "procurement_rate": "조달률",
-            "award_rate": "입찰 대비 낙찰률",
-            "excess_bid_volume": "초과입찰량 (MW)",
-            "shortage_volume": "미조달량 (MW)",
+            "bid_coverage_ratio": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
+            "procurement_rate": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
+            "award_rate": "입찰 대비 낙찰률 (전원 소재지별)",
+            "excess_bid_volume": "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)",
+            "shortage_volume": "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)",
             "area_count": "포함 지역 수",
             "missing_areas": "누락 지역",
             "completeness_flag": "데이터 완전성",
@@ -896,18 +924,18 @@ def render_national_overview(
             [
                 "시간대 번호",
                 "시작시간",
-                "모집량 (MW)",
-                "입찰량 (MW)",
-                "낙찰량 (MW)",
-                "가중평균 낙찰가격",
-                "최고 낙찰가격",
-                "최저 낙찰가격",
+                "모집량 (TSO별, MW)",
+                "입찰량 (전원 소재지별, MW)",
+                "낙찰량 (전원 소재지별, MW)",
+                f"가중평균 낙찰가격 (전원 소재지별, {price_unit})",
+                f"최고 낙찰가격 (전원 소재지별, {price_unit})",
+                f"최저 낙찰가격 (전원 소재지별, {price_unit})",
                 "가격 범위",
-                "입찰경쟁률 (배)",
-                "조달률",
-                "입찰 대비 낙찰률",
-                "초과입찰량 (MW)",
-                "미조달량 (MW)",
+                "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
+                "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
+                "입찰 대비 낙찰률 (전원 소재지별)",
+                "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)",
+                "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)",
                 "포함 지역 수",
                 "누락 지역",
                 "데이터 완전성",
@@ -916,18 +944,18 @@ def render_national_overview(
     target.dataframe(
         detailed_display.style.format(
             {
-                "모집량 (MW)": "{:,.2f}",
-                "입찰량 (MW)": "{:,.2f}",
-                "낙찰량 (MW)": "{:,.2f}",
-                "가중평균 낙찰가격": "{:,.2f}",
-                "최고 낙찰가격": "{:,.2f}",
-                "최저 낙찰가격": "{:,.2f}",
+                "모집량 (TSO별, MW)": "{:,.2f}",
+                "입찰량 (전원 소재지별, MW)": "{:,.2f}",
+                "낙찰량 (전원 소재지별, MW)": "{:,.2f}",
+                f"가중평균 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
+                f"최고 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
+                f"최저 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
                 "가격 범위": "{:,.2f}",
-                "입찰경쟁률 (배)": "{:.2f}배",
-                "조달률": "{:.2%}",
-                "입찰 대비 낙찰률": "{:.2%}",
-                "초과입찰량 (MW)": "{:,.2f}",
-                "미조달량 (MW)": "{:,.2f}",
+                "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "{:.2f}배",
+                "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "{:.2%}",
+                "입찰 대비 낙찰률 (전원 소재지별)": "{:.2%}",
+                "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)": "{:,.2f}",
+                "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)": "{:,.2f}",
             },
             na_rep="계산 불가",
         ),
@@ -939,15 +967,15 @@ def render_national_overview(
         columns={
             "area_display": "지역",
             "frequency_zone": "주파수권역",
-            "avg_procurement_volume": "평균 모집량 (MW)",
-            "avg_bid_volume": "평균 입찰량 (MW)",
-            "avg_awarded_volume": "평균 낙찰량 (MW)",
-            "bid_coverage_ratio": "입찰경쟁률 (배)",
-            "procurement_rate": "조달률",
-            "award_rate": "입찰 대비 낙찰률",
-            "weighted_avg_price": "낙찰량 가중평균 낙찰가격",
-            "max_price": "최고 낙찰가격",
-            "min_price": "최저 낙찰가격",
+            "avg_procurement_volume": "평균 모집량 (TSO별, MW)",
+            "avg_bid_volume": "평균 입찰량 (전원 소재지별, MW)",
+            "avg_awarded_volume": "평균 낙찰량 (전원 소재지별, MW)",
+            "bid_coverage_ratio": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
+            "procurement_rate": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
+            "award_rate": "입찰 대비 낙찰률 (전원 소재지별)",
+            "weighted_avg_price": f"낙찰량 가중평균 낙찰가격 (전원 소재지별, {price_unit})",
+            "max_price": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
+            "min_price": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
             "shortage_period_count": "미조달 시간대 수",
             "max_shortage_volume": "최대 미조달량 (MW)",
             "observed_period_count": "관측 시간대 수",
@@ -960,15 +988,15 @@ def render_national_overview(
     target.dataframe(
         region_display.drop(columns=["area"]).style.format(
             {
-                "평균 모집량 (MW)": "{:,.2f}",
-                "평균 입찰량 (MW)": "{:,.2f}",
-                "평균 낙찰량 (MW)": "{:,.2f}",
-                "입찰경쟁률 (배)": "{:.2f}배",
-                "조달률": "{:.2%}",
-                "입찰 대비 낙찰률": "{:.2%}",
-                "낙찰량 가중평균 낙찰가격": "{:,.2f}",
-                "최고 낙찰가격": "{:,.2f}",
-                "최저 낙찰가격": "{:,.2f}",
+                "평균 모집량 (TSO별, MW)": "{:,.2f}",
+                "평균 입찰량 (전원 소재지별, MW)": "{:,.2f}",
+                "평균 낙찰량 (전원 소재지별, MW)": "{:,.2f}",
+                "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "{:.2f}배",
+                "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "{:.2%}",
+                "입찰 대비 낙찰률 (전원 소재지별)": "{:.2%}",
+                f"낙찰량 가중평균 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
+                f"최고 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
+                f"최저 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
                 "최대 미조달량 (MW)": "{:,.2f}",
             },
             na_rep="계산 불가",
@@ -976,17 +1004,23 @@ def render_national_overview(
         width="stretch",
     )
 
-    with target.expander("전국 요약지표 설명"):
+    with target.expander("데이터 기준 설명"):
         st.markdown(
             """
-- 전국 모집량·입찰량·낙찰량: 9개 지역 물량의 시간대별 합계
-- 전국 입찰경쟁률: 전국 입찰량 ÷ 전국 모집량
-- 전국 조달률: 전국 낙찰량 ÷ 전국 모집량
-- 전국 가중평균 낙찰가격: 지역별 평균 낙찰가격을 낙찰량으로 가중한 참고값
+- 전원 소재지별: 해당 지역에 위치한 발전기·ESS 등 전원의 입찰 및 낙찰 결과
+- 일반송배전사업자(TSO)별: 해당 지역 일반송배전사업자의 모집 및 조달 결과
+- 낙찰가격·입찰량·낙찰량은 전원 소재지별, 모집량은 TSO별
+- 전국 모집량·입찰량·낙찰량: 각 공표 기준에 따른 9개 지역 물량의 시간대별 합계
+- 전국 입찰경쟁률: 전원 소재지별 전국 입찰량 ÷ TSO별 전국 모집량
+- 전국 조달률: 전원 소재지별 전국 낙찰량 ÷ TSO별 전국 모집량
+- 전국 가중평균 낙찰가격: 전원 소재지별 평균 낙찰가격을 전원 소재지별 낙찰량으로 가중한 참고값
 - 최고·최저가격은 지역 가격을 합산하거나 평균하지 않고 각각 최댓값·최솟값 사용
 - 주간 물량 합계는 30분 상품구간별 MW 합계이며 MWh 에너지량이 아님
+- 두 기준은 지역 귀속 방식이 다르므로 혼합 계산 지표는 해석에 주의 필요
 - 일부 원본에서는 낙찰량이 모집량보다 많은 시간대가 나타날 수 있음
 - 전국 요약은 시장 규모 파악용이며, 지역 비교는 권역 및 상세분석 탭을 이용
+
+**본 앱의 낙찰가격은 전원 소재지별 공표값을 사용합니다.**
 """
         )
 
@@ -1058,10 +1092,18 @@ def render_regional_analysis(
             kpi_display.loc[row, column] = formatted
     kpi_display = kpi_display.rename(
         index={
-            "평균 낙찰가격": f"평균 낙찰가격 ({price_unit})",
-            "최고 낙찰가격": f"최고 낙찰가격 ({price_unit})",
-            "최저 낙찰가격": f"최저 낙찰가격 ({price_unit})",
-            "평균 가격범위": f"평균 가격범위 ({price_unit})",
+            "평균 모집량 (MW)": "평균 모집량 (TSO별, MW)",
+            "평균 입찰량 (MW)": "평균 입찰량 (전원 소재지별, MW)",
+            "평균 낙찰량 (MW)": "평균 낙찰량 (전원 소재지별, MW)",
+            "입찰경쟁률 (배)": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
+            "조달률 (%)": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량, %)",
+            "입찰 대비 낙찰률 (%)": "입찰 대비 낙찰률 (전원 소재지별, %)",
+            "평균 낙찰가격": f"평균 낙찰가격 (전원 소재지별, {price_unit})",
+            "최고 낙찰가격": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
+            "최저 낙찰가격": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
+            "평균 가격범위": f"평균 가격범위 (전원 소재지별, {price_unit})",
+            "미조달 시간대 수": "미조달 시간대 수 (TSO별 모집량 대비 소재지별 낙찰량)",
+            "평균 미조달량 (MW)": "평균 미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)",
         }
     )
     target.dataframe(kpi_display, width="stretch")
@@ -1122,6 +1164,16 @@ def render_regional_analysis(
         previous_display["변화율"] = previous_display["변화율"].map(
             lambda value: "계산 불가" if pd.isna(value) else f"{value:+.2%}"
         )
+        previous_display["지표"] = previous_display["지표"].replace(
+            {
+                "평균 모집량 (MW)": "평균 모집량 (TSO별, MW)",
+                "평균 입찰량 (MW)": "평균 입찰량 (전원 소재지별, MW)",
+                "평균 낙찰량 (MW)": "평균 낙찰량 (전원 소재지별, MW)",
+                "입찰경쟁률 (배)": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
+                "조달률 (%)": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량, %)",
+                "평균 낙찰가격": f"평균 낙찰가격 (전원 소재지별, {price_unit})",
+            }
+        )
         target.caption(
             f"비교 주차: {previous_meta['previous_week']:%Y-%m-%d} 시작 주"
         )
@@ -1158,18 +1210,18 @@ def render_regional_analysis(
             "area": "지역",
             "period_no": "시간대 번호",
             "period_start": "시작시간",
-            "procurement_volume": "모집량 (MW)",
-            "bid_volume": "입찰량 (MW)",
-            "awarded_volume": "낙찰량 (MW)",
-            "max_price": "최고 낙찰가격",
-            "avg_price": "평균 낙찰가격",
-            "min_price": "최저 낙찰가격",
-            "price_range": "가격 범위",
-            "bid_coverage_ratio": "입찰경쟁률 (배)",
-            "procurement_rate": "조달률",
-            "award_rate": "입찰 대비 낙찰률",
-            "excess_bid_volume": "초과입찰량 (MW)",
-            "shortage_volume": "미조달량 (MW)",
+            "procurement_volume": "모집량 (TSO별, MW)",
+            "bid_volume": "입찰량 (전원 소재지별, MW)",
+            "awarded_volume": "낙찰량 (전원 소재지별, MW)",
+            "max_price": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
+            "avg_price": f"평균 낙찰가격 (전원 소재지별, {price_unit})",
+            "min_price": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
+            "price_range": f"가격 범위 (전원 소재지별, {price_unit})",
+            "bid_coverage_ratio": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
+            "procurement_rate": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)",
+            "award_rate": "입찰 대비 낙찰률 (전원 소재지별)",
+            "excess_bid_volume": "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)",
+            "shortage_volume": "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)",
             "observation_count": "관측일수",
             "completeness_flag": "데이터 완전성",
         }
@@ -1178,41 +1230,45 @@ def render_regional_analysis(
     target.dataframe(
         detailed.style.format(
             {
-                "모집량 (MW)": "{:,.2f}",
-                "입찰량 (MW)": "{:,.2f}",
-                "낙찰량 (MW)": "{:,.2f}",
-                "최고 낙찰가격": "{:,.2f}",
-                "평균 낙찰가격": "{:,.2f}",
-                "최저 낙찰가격": "{:,.2f}",
-                "가격 범위": "{:,.2f}",
-                "입찰경쟁률 (배)": "{:.2f}배",
-                "조달률": "{:.2%}",
-                "입찰 대비 낙찰률": "{:.2%}",
-                "초과입찰량 (MW)": "{:,.2f}",
-                "미조달량 (MW)": "{:,.2f}",
+                "모집량 (TSO별, MW)": "{:,.2f}",
+                "입찰량 (전원 소재지별, MW)": "{:,.2f}",
+                "낙찰량 (전원 소재지별, MW)": "{:,.2f}",
+                f"최고 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
+                f"평균 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
+                f"최저 낙찰가격 (전원 소재지별, {price_unit})": "{:,.2f}",
+                f"가격 범위 (전원 소재지별, {price_unit})": "{:,.2f}",
+                "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)": "{:.2f}배",
+                "조달률 (소재지별 낙찰량 ÷ TSO별 모집량)": "{:.2%}",
+                "입찰 대비 낙찰률 (전원 소재지별)": "{:.2%}",
+                "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)": "{:,.2f}",
+                "미조달량 (TSO별 모집량 − 소재지별 낙찰량, MW)": "{:,.2f}",
             },
             na_rep="계산 불가",
         ),
         width="stretch",
     )
-    with target.expander("지역 상세지표 설명"):
+    with target.expander("데이터 기준 설명"):
         st.markdown(
             """
 - 도쿄: 50Hz권역에 속하는 개별 지역
 - 중부: 60Hz권역에 속하는 개별 지역
-- 모집량: 해당 시간대에 확보하려고 공고한 물량
-- 입찰량: 시장 참여자가 제출한 전체 물량
-- 낙찰량: 실제 거래를 통해 선정된 물량
-- 입찰경쟁률: 입찰량 ÷ 모집량
-- 조달률: 낙찰량 ÷ 모집량
-- 입찰 대비 낙찰률: 낙찰량 ÷ 입찰량
+- 전원 소재지별: 해당 지역에 위치한 발전기·ESS 등 전원의 입찰 및 낙찰 결과
+- 일반송배전사업자(TSO)별: 해당 지역 일반송배전사업자의 모집 및 조달 결과
+- 낙찰가격·입찰량·낙찰량은 전원 소재지별
+- 모집량은 TSO별
+- 입찰경쟁률: 전원 소재지별 입찰량 ÷ TSO별 모집량
+- 조달률: 전원 소재지별 낙찰량 ÷ TSO별 모집량
+- 입찰 대비 낙찰률: 전원 소재지별 낙찰량 ÷ 전원 소재지별 입찰량
 - 가격 범위: 최고 낙찰가격 − 최저 낙찰가격
 - 초과입찰량: 입찰량 − 모집량
 - 미조달량: 모집량 − 낙찰량과 0 중 큰 값
 - 전주 대비 변화: 현재 주 값과 직전 보유 주차 값의 차이
+- 두 기준은 지역 귀속 방식이 다르므로 혼합 계산 지표는 해석에 주의 필요
 
 일부 EPRX 원본 데이터에서는 낙찰량이 모집량보다 많은 시간대가 나타날 수 있습니다.
 앱은 원본 EPRX 값을 수정하지 않고 그대로 표시합니다.
+
+**본 앱의 낙찰가격은 전원 소재지별 공표값을 사용합니다.**
 """
         )
 
