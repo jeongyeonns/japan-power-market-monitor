@@ -1046,7 +1046,6 @@ def render_regional_analysis(
 ) -> None:
     """도쿄·중부 지역 상세분석 탭을 표시합니다."""
     view_options = {
-        "도쿄·중부 비교": ["Tokyo", "Chubu"],
         "도쿄": ["Tokyo"],
         "중부": ["Chubu"],
     }
