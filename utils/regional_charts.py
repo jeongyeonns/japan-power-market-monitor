@@ -52,6 +52,7 @@ def area_max_price_chart(
     profile: pd.DataFrame, areas: list[str], price_unit: str
 ) -> go.Figure:
     data = _display_data(profile, areas)
+    area_label = "·".join(AREA_NAMES.get(area, area) for area in areas)
     figure = px.line(
         data,
         x="period_start",
@@ -59,7 +60,7 @@ def area_max_price_chart(
         color="지역",
         category_orders={"period_start": PERIOD_ORDER},
         color_discrete_map=AREA_COLORS,
-        title="도쿄·중부 시간대별 평균 최고 낙찰가격",
+        title=f"{area_label} 시간대별 평균 최고 낙찰가격",
         labels={
             "period_start": "시간대",
             "max_price": f"평균 최고 낙찰가격 (전원 소재지별, {price_unit})",
@@ -73,6 +74,7 @@ def area_max_price_chart(
             "<extra></extra>"
         )
     )
+    figure.update_yaxes(rangemode="tozero")
     return _finish(figure, f"평균 최고 낙찰가격 (전원 소재지별, {price_unit})")
 
 
@@ -80,6 +82,7 @@ def area_award_rate_chart(
     profile: pd.DataFrame, areas: list[str]
 ) -> go.Figure:
     data = _display_data(profile, areas)
+    area_label = "·".join(AREA_NAMES.get(area, area) for area in areas)
     figure = px.line(
         data,
         x="period_start",
@@ -88,7 +91,7 @@ def area_award_rate_chart(
         custom_data=["bid_volume", "awarded_volume"],
         category_orders={"period_start": PERIOD_ORDER},
         color_discrete_map=AREA_COLORS,
-        title="도쿄·중부 입찰 대비 낙찰률",
+        title=f"{area_label} 시간대별 입찰 대비 낙찰률",
         labels={
             "period_start": "시간대",
             "award_rate": "입찰 대비 낙찰률 (전원 소재지별, %)",
@@ -103,7 +106,7 @@ def area_award_rate_chart(
             "입찰 대비 낙찰률=%{y:.2%}<extra></extra>"
         )
     )
-    figure.update_yaxes(tickformat=".0%")
+    figure.update_yaxes(tickformat=".0%", rangemode="tozero")
     return _finish(figure, "입찰 대비 낙찰률 (전원 소재지별, %)")
 
 

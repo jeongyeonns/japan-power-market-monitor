@@ -1082,7 +1082,13 @@ def render_regional_analysis(
 
     over_rate = profile.loc[profile["procurement_rate"] > 1]
 
-    target.subheader("주간 핵심지표 비교")
+    target.subheader(f"{view} 주간 핵심지표")
+    weekly_kpi_rows = [
+        "평균 모집량 (MW)",
+        "평균 입찰량 (MW)",
+        "평균 낙찰량 (MW)",
+        "입찰 대비 낙찰률 (%)",
+    ]
     excluded_kpi_rows = {
         "입찰경쟁률 (배)",
         "조달률 (%)",
@@ -1090,9 +1096,7 @@ def render_regional_analysis(
         "미조달 시간대 수",
         "평균 미조달량 (MW)",
     }
-    kpi_display = kpi_table.drop(
-        index=list(excluded_kpi_rows), errors="ignore"
-    ).drop(columns=["중부−도쿄 차이"], errors="ignore").astype(object)
+    kpi_display = kpi_table.reindex(weekly_kpi_rows)[[view]].copy().astype(object)
     percent_rows = {"입찰 대비 낙찰률 (%)"}
     for row in kpi_display.index:
         for column in kpi_display.columns:
