@@ -1092,6 +1092,9 @@ def render_regional_analysis(
     excluded_kpi_rows = {
         "입찰경쟁률 (배)",
         "조달률 (%)",
+        "평균 낙찰가격",
+        "최고 낙찰가격",
+        "최저 낙찰가격",
         "평균 가격범위",
         "미조달 시간대 수",
         "평균 미조달량 (MW)",
@@ -1179,7 +1182,7 @@ def render_regional_analysis(
         )
         render_hierarchical_metric_table(target, previous_display)
 
-    target.subheader("도쿄·중부 시간대별 상세 데이터")
+    target.subheader(f"{view} 시간대별 상세 데이터")
     detailed = profile.loc[profile["area"].isin(visible_areas)].copy()
     detailed["area"] = detailed["area"].map(AREA_DISPLAY)
     detailed["completeness_flag"] = detailed["completeness_flag"].replace(
@@ -1233,6 +1236,10 @@ def render_regional_analysis(
     target.caption(
         "데이터 기준: 모집량은 TSO별, 입찰량·낙찰량·낙찰가격은 전원 소재지별입니다. "
         "입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다."
+    )
+    target.caption(
+        "최고·평균·최저 낙찰가격은 각 날짜에 공표된 값을 동일 시간대별로 모아 "
+        "선택 주차 단위로 평균한 값입니다."
     )
     target.dataframe(
         detailed.style.format(
