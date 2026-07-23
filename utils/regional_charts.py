@@ -11,12 +11,28 @@ AREA_COLORS = {"도쿄": "#1f77b4", "중부": "#d62728"}
 PERIOD_ORDER = [
     f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 30)
 ]
+AUTOSCALE_HINT = "화면이 확대·이동된 경우 Autoscale을 눌러주세요."
 
 
 def _display_data(profile: pd.DataFrame, areas: list[str]) -> pd.DataFrame:
     data = profile.loc[profile["area"].isin(areas)].copy()
     data["지역"] = data["area"].map(AREA_NAMES)
     return data
+
+
+def _add_autoscale_hint(figure: go.Figure) -> None:
+    figure.add_annotation(
+        text=AUTOSCALE_HINT,
+        xref="paper",
+        yref="paper",
+        x=1,
+        y=1.02,
+        xanchor="right",
+        yanchor="bottom",
+        showarrow=False,
+        font={"size": 11, "color": "#8a8f98"},
+        align="right",
+    )
 
 
 def area_price_chart(
@@ -75,6 +91,7 @@ def area_max_price_chart(
         )
     )
     figure.update_yaxes(range=[0, 15], rangemode="tozero")
+    _add_autoscale_hint(figure)
     return _finish(figure, f"평균 최고 낙찰가격 (전원 소재지별, {price_unit})")
 
 
@@ -107,6 +124,7 @@ def area_award_rate_chart(
         )
     )
     figure.update_yaxes(range=[0, 1], tickformat=".0%", rangemode="tozero")
+    _add_autoscale_hint(figure)
     return _finish(figure, "입찰 대비 낙찰률 (전원 소재지별, %)")
 
 

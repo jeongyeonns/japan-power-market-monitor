@@ -18,6 +18,7 @@ from utils.jepx_loader import (
     find_jepx_files,
     load_all_jepx_data,
 )
+from utils.jepx_downloader import JepxDownloadError, download_spot_summary
 from utils.jepx_spread import (
     DEFAULT_OPERATION_MODE,
     calculate_all_daily_spreads,
@@ -1089,16 +1090,6 @@ def render_regional_analysis(
         "평균 낙찰량 (MW)",
         "입찰 대비 낙찰률 (%)",
     ]
-    excluded_kpi_rows = {
-        "입찰경쟁률 (배)",
-        "조달률 (%)",
-        "평균 낙찰가격",
-        "최고 낙찰가격",
-        "최저 낙찰가격",
-        "평균 가격범위",
-        "미조달 시간대 수",
-        "평균 미조달량 (MW)",
-    }
     kpi_display = kpi_table.reindex(weekly_kpi_rows)[[view]].copy().astype(object)
     percent_rows = {"입찰 대비 낙찰률 (%)"}
     for row in kpi_display.index:
@@ -1145,24 +1136,28 @@ def render_regional_analysis(
     target.plotly_chart(
         area_max_price_chart(profile, visible_areas, price_unit), width="stretch"
     )
-    target.caption(
-        "그래프를 잘못 클릭하거나 확대했을 경우, 오른쪽 상단의 Autoscale 버튼을 "
-        "누르면 원래 화면으로 돌아갈 수 있습니다."
-    )
     target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
     target.plotly_chart(
         area_award_rate_chart(profile, visible_areas), width="stretch"
     )
-    target.caption(
-        "그래프를 잘못 클릭하거나 확대했을 경우, 오른쪽 상단의 Autoscale 버튼을 "
-        "누르면 원래 화면으로 돌아갈 수 있습니다."
-    )
 
     target.subheader("전주 대비 변화")
     if not previous.empty:
-        previous_display = previous.loc[
-            ~previous["지표"].isin(excluded_kpi_rows)
-        ].copy()
+        week_over_week_rows = [
+            "평균 모집량 (MW)",
+            "평균 입찰량 (MW)",
+            "평균 낙찰량 (MW)",
+        ]
+        previous_display = (
+            previous.loc[
+                previous["지역"].eq(view)
+                & previous["지표"].isin(week_over_week_rows)
+            ]
+            .set_index("지표")
+            .reindex(week_over_week_rows)
+            .reset_index()
+        )
+        previous_display["지역"] = view
         previous_display["현재 주"] = previous_display["현재 주"].map(
             lambda value: "계산 불가" if pd.isna(value) else f"{value:,.2f}"
         )
@@ -1297,6 +1292,40 @@ def render_regional_analysis(
 def render_jepx_market_placeholder() -> None:
     """JEPX 원본 연결 상태와 정규화 진단만 표시합니다."""
     st.header("JEPX Day-Ahead 현물가격 및 ESS 스프레드 분석")
+    with st.expander("JEPX 데이터 업데이트"):
+        st.caption(
+            "JEPX 공식 공개 다운로드에서 최신 연도의 Spot CSV를 1회 확인하고, "
+            "기존 파서 검증에 성공한 파일만 반영합니다."
+        )
+        if st.button(
+            "최신 JEPX CSV 다운로드 및 반영",
+            key="jepx_download_latest",
+            width="stretch",
+        ):
+            try:
+                with st.spinner("JEPX 공식 공개 CSV를 확인하고 있습니다..."):
+                    result = download_spot_summary(
+                        destination_directory=JEPX_DATA_DIRECTORY
+                    )
+                st.session_state["jepx_download_result"] = result
+                st.cache_data.clear()
+                st.rerun()
+            except JepxDownloadError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error("JEPX 공개 CSV를 반영하지 못했습니다.")
+                with st.expander("상세 오류"):
+                    st.code(f"{type(exc).__name__}: {exc}")
+        result = st.session_state.get("jepx_download_result")
+        if result:
+            st.success(
+                f"{result['file_name']} — {result['status']} "
+                f"({result['date_min']:%Y-%m-%d} ~ {result['date_max']:%Y-%m-%d})"
+            )
+            st.caption(
+                f"출처: JEPX 공식 공개 다운로드 · "
+                f"정규화 {result['normalized_rows']:,}행 · SHA-256 {result['sha256']}"
+            )
     try:
         signatures = jepx_file_signatures()
         long_data, wide_data, errors, warnings, file_summary = load_jepx_data(
