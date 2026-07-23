@@ -1,0 +1,52 @@
+name: Update JEPX Day-Ahead data
+
+on:
+  schedule:
+    # 매일 19:15 JST/KST. GitHub Actions cron은 UTC 기준입니다.
+    - cron: "15 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-jepx-day-ahead-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install downloader dependencies
+        run: >-
+          python -m pip install
+          "numpy>=2,<3"
+          "pandas>=2.2,<4"
+          "requests>=2.31,<3"
+
+      - name: Download and validate latest JEPX CSV
+        run: python -m utils.jepx_downloader
+
+      - name: Commit updated public CSV
+        shell: bash
+        run: |
+          git add -- 'data/jepx/raw/spot_summary_'*.csv
+          if git diff --cached --quiet; then
+            echo "JEPX CSV has no changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update JEPX Day-Ahead data"
+          git push

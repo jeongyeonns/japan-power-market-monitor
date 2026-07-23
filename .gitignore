@@ -27,6 +27,6 @@ data/eprx/metadata/*.csv
 !data/eprx/.gitkeep
 data/jepx/raw/*
 !data/jepx/raw/.gitkeep
-!data/jepx/raw/spot_summary_2026.csv
+!data/jepx/raw/spot_summary_*.csv
 data/jepx/metadata/*
 !data/jepx/metadata/.gitkeep

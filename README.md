@@ -25,6 +25,17 @@ long 형식으로 변환합니다. long 데이터는 날짜, 30분 코마, Asia/
 오류·검토 경고는 JEPX 화면의 `JEPX 데이터 품질 및 파일 진단`에서 확인할 수
 있습니다. 실제 구조는 [JEPX_DATA_DICTIONARY.md](JEPX_DATA_DICTIONARY.md)에 기록했습니다.
 
+JEPX 화면의 `JEPX 데이터 업데이트`에서 공식 공개 Spot 연도별 CSV를 내려받을 수
+있습니다. 로그인이나 회원 API를 사용하지 않으며, 공식 페이지의 공개 다운로드 form을
+사용합니다. 다운로드한 파일은 기존 JEPX 파서 검증에 성공한 경우에만
+`data/jepx/raw/spot_summary_<연도>.csv`로 반영됩니다. 데이터 이용 시 출처를 JEPX로
+표시해야 하며, 공식 사이트의 공개 형식은 예고 없이 변경될 수 있습니다.
+
+같은 작업은 `python -m utils.jepx_downloader`로 독립 실행할 수 있습니다. GitHub
+Actions의 `Update JEPX Day-Ahead data` 워크플로는 매일 19:15(JST/KST)에 이를 한 번
+실행하며, 검증된 CSV 내용이 달라진 경우에만 저장소에 커밋합니다. 워크플로가 커밋을
+푸시하려면 저장소의 Actions workflow 권한이 `Read and write permissions`여야 합니다.
+
 JEPX 화면에는 1·2·4시간 일별 스프레드 계산 검증 기능이 있습니다. 기본 `기존 NEM
 방식`은 하루 중 가장 싼 2·4·8개 30분 가격과 가장 비싼 같은 수의 가격을 각각
 평균합니다. `순서 무관 연속구간`은 겹치지 않는 연속 구간 쌍을, `충전 후 방전
