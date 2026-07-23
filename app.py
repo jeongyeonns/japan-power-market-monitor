@@ -1145,9 +1145,17 @@ def render_regional_analysis(
     target.plotly_chart(
         area_max_price_chart(profile, visible_areas, price_unit), width="stretch"
     )
+    target.caption(
+        "그래프를 잘못 클릭하거나 확대했을 경우, 오른쪽 상단의 Autoscale 버튼을 "
+        "누르면 원래 화면으로 돌아갈 수 있습니다."
+    )
     target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
     target.plotly_chart(
         area_award_rate_chart(profile, visible_areas), width="stretch"
+    )
+    target.caption(
+        "그래프를 잘못 클릭하거나 확대했을 경우, 오른쪽 상단의 Autoscale 버튼을 "
+        "누르면 원래 화면으로 돌아갈 수 있습니다."
     )
 
     target.subheader("전주 대비 변화")
