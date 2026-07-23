@@ -74,7 +74,7 @@ def area_max_price_chart(
             "<extra></extra>"
         )
     )
-    figure.update_yaxes(rangemode="tozero")
+    figure.update_yaxes(range=[0, 15], rangemode="tozero")
     return _finish(figure, f"평균 최고 낙찰가격 (전원 소재지별, {price_unit})")
 
 
@@ -106,7 +106,7 @@ def area_award_rate_chart(
             "입찰 대비 낙찰률=%{y:.2%}<extra></extra>"
         )
     )
-    figure.update_yaxes(tickformat=".0%", rangemode="tozero")
+    figure.update_yaxes(range=[0, 1], tickformat=".0%", rangemode="tozero")
     return _finish(figure, "입찰 대비 낙찰률 (전원 소재지별, %)")
 
 
