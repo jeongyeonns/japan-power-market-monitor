@@ -160,7 +160,7 @@ def calculate_previous_week_comparison(
         prepared, previous_week, ["Tokyo", "Chubu"]
     )
     metrics = [
-        "평균 낙찰가격",
+        "최고 낙찰가격",
         "평균 모집량 (MW)",
         "평균 입찰량 (MW)",
         "평균 낙찰량 (MW)",

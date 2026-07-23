@@ -1135,7 +1135,7 @@ def render_regional_analysis(
             len(source_over),
         )
 
-    target.caption("전원 소재지별 최고 낙찰가격")
+    target.caption("전원 소재지별 최고 낙찰가격의 선택 주차 동일 시간대 평균")
     target.plotly_chart(
         area_max_price_chart(profile, visible_areas, price_unit), width="stretch"
     )
@@ -1168,7 +1168,7 @@ def render_regional_analysis(
                 "평균 낙찰량 (MW)": "평균 낙찰량 (전원 소재지별, MW)",
                 "입찰경쟁률 (배)": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
                 "조달률 (%)": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량, %)",
-                "평균 낙찰가격": f"평균 낙찰가격 (전원 소재지별, {price_unit})",
+                "최고 낙찰가격": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
             }
         )
         target.caption(

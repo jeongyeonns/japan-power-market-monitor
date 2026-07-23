@@ -59,21 +59,21 @@ def area_max_price_chart(
         color="지역",
         category_orders={"period_start": PERIOD_ORDER},
         color_discrete_map=AREA_COLORS,
-        title="도쿄·중부 시간대별 최고 낙찰가격",
+        title="도쿄·중부 시간대별 평균 최고 낙찰가격",
         labels={
             "period_start": "시간대",
-            "max_price": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
+            "max_price": f"평균 최고 낙찰가격 (전원 소재지별, {price_unit})",
             "지역": "지역",
         },
     )
     figure.update_traces(
         hovertemplate=(
             "지역=%{fullData.name}<br>시간대=%{x}<br>"
-            f"최고 낙찰가격(전원 소재지별)=%{{y:,.2f}} {price_unit}"
+            f"평균 최고 낙찰가격(전원 소재지별)=%{{y:,.2f}} {price_unit}"
             "<extra></extra>"
         )
     )
-    return _finish(figure, f"최고 낙찰가격 (전원 소재지별, {price_unit})")
+    return _finish(figure, f"평균 최고 낙찰가격 (전원 소재지별, {price_unit})")
 
 
 def area_award_rate_chart(
