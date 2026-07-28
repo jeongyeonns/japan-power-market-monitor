@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from utils.eprx_periods import market_regime
 from utils.sample_data import AREA_TO_ZONE
 
 VALUE_COLUMNS = [
@@ -40,10 +41,12 @@ def create_regional_weekly_profile(
     columns = [
         "area",
         "frequency_zone",
+        "market_regime",
         "period_no",
         "period_start",
         *VALUE_COLUMNS,
         "observation_count",
+        "expected_observation_count",
         "data_status",
     ]
     if selected.empty:
@@ -52,9 +55,15 @@ def create_regional_weekly_profile(
     if missing_columns:
         raise ValueError(f"주간 집계 필수 열 누락: {', '.join(missing_columns)}")
 
+    selected["market_regime"] = selected["delivery_date"].map(market_regime)
+    week_dates = pd.date_range(selected_start, periods=7, freq="D")
+    expected_days = (
+        pd.Series([market_regime(day) for day in week_dates]).value_counts().to_dict()
+    )
+
     grouped = (
         selected.groupby(
-            ["area", "frequency_zone", "period_no", "period_start"],
+            ["area", "frequency_zone", "market_regime", "period_no", "period_start"],
             as_index=False,
             observed=True,
         )
@@ -62,11 +71,16 @@ def create_regional_weekly_profile(
             **{column: (column, "mean") for column in VALUE_COLUMNS},
             observation_count=("delivery_date", "nunique"),
         )
-        .sort_values(["area", "period_no"])
+        .sort_values(["area", "market_regime", "period_no"])
         .reset_index(drop=True)
     )
+    grouped["expected_observation_count"] = (
+        grouped["market_regime"].map(expected_days).astype(int)
+    )
     grouped["data_status"] = np.where(
-        grouped["observation_count"] == 7, "Complete", "Incomplete"
+        grouped["observation_count"].eq(grouped["expected_observation_count"]),
+        "Complete",
+        "Incomplete",
     )
     return grouped[columns]
 
@@ -160,8 +174,14 @@ def create_selected_area_weekly_profile(
             shortage_volume=pd.Series(dtype="float64"),
             price_range=pd.Series(dtype="float64"),
         )
+    expected_observations = selected.get(
+        "expected_observation_count",
+        pd.Series(7, index=selected.index),
+    )
     selected["completeness_flag"] = np.where(
-        selected["observation_count"].eq(7), "Complete", "Incomplete"
+        selected["observation_count"].eq(expected_observations),
+        "Complete",
+        "Incomplete",
     )
     selected["bid_coverage_ratio"] = _safe_divide(
         selected["bid_volume"], selected["procurement_volume"]
@@ -179,7 +199,9 @@ def create_selected_area_weekly_profile(
         selected["procurement_volume"] - selected["awarded_volume"]
     ).clip(lower=0)
     selected["price_range"] = selected["max_price"] - selected["min_price"]
-    return selected.sort_values(["area", "period_no"]).reset_index(drop=True)
+    return selected.sort_values(
+        ["area", "market_regime", "period_no"]
+    ).reset_index(drop=True)
 
 
 def find_missing_areas(regional_profile: pd.DataFrame) -> dict[str, list[str]]:

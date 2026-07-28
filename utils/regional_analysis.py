@@ -8,6 +8,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.eprx_periods import (
+    LEGACY_PERIOD_COUNT,
+    LEGACY_REGIME,
+    MODERN_PERIOD_COUNT,
+    MODERN_REGIME,
+)
 from utils.weekly_aggregation import (
     add_week_columns,
     create_selected_area_weekly_profile,
@@ -60,7 +66,7 @@ def safe_ratio(numerator: float, denominator: float) -> float:
 def calculate_area_kpis(
     area_profile: pd.DataFrame, raw_area_data: pd.DataFrame
 ) -> dict[str, float]:
-    """한 지역의 48개 프로파일 및 선택 주 원본으로 KPI를 계산합니다."""
+    """한 지역의 실제 거래제도 블록 및 선택 주 원본으로 KPI를 계산합니다."""
     if area_profile.empty:
         return {label: np.nan for label in AREA_KPI_ORDER}
     procurement_sum = area_profile["procurement_volume"].sum(min_count=1)
@@ -113,7 +119,7 @@ def validate_area_profile(
     selected_week_days: int,
     areas: tuple[str, ...] = DEFAULT_ANALYSIS_AREAS,
 ) -> list[str]:
-    """지역 존재·48개 시간대·7일 관측·필수 열을 검사합니다."""
+    """지역 존재·제도별 시간 블록·관측일 완전성을 검사합니다."""
     warnings: list[str] = []
     required = {
         "max_price",
@@ -126,18 +132,51 @@ def validate_area_profile(
     missing_columns = sorted(required - set(area_profile.columns))
     if missing_columns:
         warnings.append("필수 가격·물량 열 누락: " + ", ".join(missing_columns))
+
+    regime_period_counts = {
+        LEGACY_REGIME: LEGACY_PERIOD_COUNT,
+        MODERN_REGIME: MODERN_PERIOD_COUNT,
+    }
     for area in areas:
         display = AREA_DISPLAY.get(area, area)
         selected = area_profile.loc[area_profile["area"].eq(area)]
         if selected.empty:
             warnings.append(f"{display} 데이터가 없습니다.")
-        elif selected["period_no"].nunique() != 48:
-            warnings.append(
-                f"{display} 시간대가 {selected['period_no'].nunique()}/48개입니다."
-            )
-        if not selected.empty and selected["observation_count"].ne(7).any():
-            count = int(selected["observation_count"].ne(7).sum())
-            warnings.append(f"{display}에서 7일 관측이 아닌 시간대가 {count}개입니다.")
+            continue
+
+        if "market_regime" in selected.columns:
+            for regime, expected_count in regime_period_counts.items():
+                regime_data = selected.loc[selected["market_regime"].eq(regime)]
+                if regime_data.empty:
+                    continue
+                actual_count = int(regime_data["period_no"].nunique())
+                if actual_count != expected_count:
+                    warnings.append(
+                        f"{display} 시간대가 {actual_count}/{expected_count}개입니다."
+                    )
+        else:
+            actual_count = int(selected["period_no"].nunique())
+            if actual_count != MODERN_PERIOD_COUNT:
+                warnings.append(
+                    f"{display} 시간대가 {actual_count}/{MODERN_PERIOD_COUNT}개입니다."
+                )
+
+        expected_observations = selected.get(
+            "expected_observation_count",
+            pd.Series(7, index=selected.index),
+        )
+        incomplete = selected["observation_count"].ne(expected_observations)
+        if incomplete.any():
+            if expected_observations.eq(7).all():
+                warnings.append(
+                    f"{display}에서 7일 관측이 아닌 시간대가 "
+                    f"{int(incomplete.sum())}개입니다."
+                )
+            else:
+                warnings.append(
+                    f"{display}에서 기대 관측일 수와 다른 시간대가 "
+                    f"{int(incomplete.sum())}개입니다."
+                )
     if selected_week_days != 7:
         warnings.append(f"선택 주차가 {selected_week_days}/7일로 불완전합니다.")
     return warnings
@@ -293,7 +332,11 @@ def create_regional_summary(
                     f"{row['지역']} 평균 낙찰가격은 전주 대비 {direction}"
                     f"({row['절대 변화']:+,.2f})했습니다."
                 )
-    if area_profile["observation_count"].ne(7).any() or area_profile[
+    expected_observations = area_profile.get(
+        "expected_observation_count",
+        pd.Series(7, index=area_profile.index),
+    )
+    if area_profile["observation_count"].ne(expected_observations).any() or area_profile[
         ["avg_price", "procurement_volume", "bid_volume", "awarded_volume"]
     ].isna().any().any():
         sentences.append("일부 시간대에 불완전하거나 결측된 데이터가 있습니다.")

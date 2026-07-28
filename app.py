@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from utils.eprx_loader import find_eprx_files, load_all_eprx_data
+from utils.eprx_periods import LEGACY_PERIOD_NOTICE, LEGACY_REGIME
 from utils.eprx_downloader import automation_approved, update_eprx_files
 from utils.jepx_loader import (
     AREA_DISPLAY as JEPX_AREA_DISPLAY,
@@ -412,20 +413,28 @@ def show_diagnostics(
                 for zone, areas in missing.items()
             }
             st.write("누락 지역:", missing_display if missing_display else "없음")
+            expected_observations = regional_profile.get(
+                "expected_observation_count",
+                pd.Series(7, index=regional_profile.index),
+            )
+            incomplete_columns = ["area", "period_start", "observation_count"]
+            if "expected_observation_count" in regional_profile.columns:
+                incomplete_columns.append("expected_observation_count")
             incomplete_slots = regional_profile.loc[
-                regional_profile["observation_count"] < 7,
-                ["area", "period_start", "observation_count"],
+                regional_profile["observation_count"].ne(expected_observations),
+                incomplete_columns,
             ].rename(
                 columns={
                     "area": "지역",
                     "period_start": "시작시간",
                     "observation_count": "관측일 수",
+                    "expected_observation_count": "기대 관측일 수",
                 }
             )
             incomplete_slots["지역"] = incomplete_slots["지역"].replace(
                 DISPLAY_AREA_NAMES
             )
-            st.write("7일 미만 지역·시간대:", len(incomplete_slots))
+            st.write("기대 관측일 수와 다른 지역·시간대:", len(incomplete_slots))
             if not incomplete_slots.empty:
                 st.dataframe(incomplete_slots, width="stretch")
         if error_data.empty:
@@ -1144,14 +1153,26 @@ def render_regional_analysis(
             len(source_over),
         )
 
-    target.caption("전원 소재지별 최고 낙찰가격의 선택 주차 동일 시간대 평균")
-    target.plotly_chart(
-        area_max_price_chart(profile, visible_areas, price_unit), width="stretch"
-    )
-    target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
-    target.plotly_chart(
-        area_award_rate_chart(profile, visible_areas), width="stretch"
-    )
+    regimes = set(profile["market_regime"].dropna())
+    has_legacy_regime = LEGACY_REGIME in regimes
+    mixed_regime_week = len(regimes) > 1
+    if has_legacy_regime:
+        target.info(LEGACY_PERIOD_NOTICE)
+    if mixed_regime_week:
+        target.info(
+            "선택 주차에는 3시간 8개 블록과 30분 48개 블록 자료가 함께 "
+            "포함되어 있어, 서로 다른 시간대를 합산하지 않고 시간대별 그래프를 "
+            "표시하지 않습니다. KPI와 상세 표는 실제 원자료 블록 기준입니다."
+        )
+    else:
+        target.caption("전원 소재지별 최고 낙찰가격의 선택 주차 동일 시간대 평균")
+        target.plotly_chart(
+            area_max_price_chart(profile, visible_areas, price_unit), width="stretch"
+        )
+        target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
+        target.plotly_chart(
+            area_award_rate_chart(profile, visible_areas), width="stretch"
+        )
 
     target.subheader("전주 대비 변화")
     if not previous.empty:
@@ -1732,10 +1753,16 @@ if regional_profile.empty:
         show_diagnostics(file_summary, error_data)
     st.stop()
 
-incomplete = regional_profile.loc[regional_profile["observation_count"] < 7]
+expected_observations = regional_profile.get(
+    "expected_observation_count",
+    pd.Series(7, index=regional_profile.index),
+)
+incomplete = regional_profile.loc[
+    regional_profile["observation_count"].ne(expected_observations)
+]
 if not incomplete.empty:
     st.warning(
-        f"7개 미만 관측값을 가진 지역·시간대가 {len(incomplete)}개 있습니다."
+        f"기대 관측일 수와 다른 지역·시간대가 {len(incomplete)}개 있습니다."
     )
 
 render_regional_analysis(

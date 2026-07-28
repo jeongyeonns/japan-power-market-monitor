@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.eprx_periods import expected_period_count, period_start_label
 from utils.sample_data import AREAS_BY_ZONE, AREA_TO_ZONE
 
 SUPPORTED_SUFFIXES = {".csv", ".xlsx", ".xls"}
@@ -264,9 +265,8 @@ def normalize_eprx_data(
                 {
                     "delivery_date": match.group("date"),
                     "period_no": int(match.group("period")),
-                    "period_start": (
-                        f"{(int(match.group('period')) - 1) // 2:02d}:"
-                        f"{((int(match.group('period')) - 1) % 2) * 30:02d}"
+                    "period_start": period_start_label(
+                        match.group("date"), int(match.group("period"))
                     ),
                     "area": area,
                     "original_area": original_area,
@@ -326,10 +326,22 @@ def validate_eprx_data(data: pd.DataFrame) -> pd.DataFrame:
         errors.append(
             _error_record(row, row["source_file"], "Fatal", "invalid_date", "날짜 변환 실패")
         )
-    invalid_period = data["period_no"].isna() | ~data["period_no"].between(1, 48)
+    expected_periods = data["delivery_date"].map(expected_period_count)
+    invalid_period = (
+        data["period_no"].isna()
+        | data["period_no"].lt(1)
+        | data["period_no"].gt(expected_periods)
+    )
     for _, row in data.loc[invalid_period].iterrows():
+        expected = expected_period_count(row["delivery_date"])
         errors.append(
-            _error_record(row, row["source_file"], "Fatal", "invalid_period", "시간대 번호가 1~48 범위가 아님")
+            _error_record(
+                row,
+                row["source_file"],
+                "Fatal",
+                "invalid_period",
+                f"시간대 번호가 1~{expected} 범위가 아님",
+            )
         )
     for column in REQUIRED_METRICS:
         for _, row in data.loc[data[column].isna()].iterrows():
@@ -385,15 +397,18 @@ def validate_eprx_data(data: pd.DataFrame) -> pd.DataFrame:
     daily = valid_dates.groupby(
         ["source_file", "delivery_date", "area", "original_product"], dropna=False
     )["period_no"].nunique()
-    for key, count in daily.loc[daily.ne(48)].items():
+    for key, count in daily.items():
         source, delivery_date, area, product = key
+        expected = expected_period_count(delivery_date)
+        if count == expected:
+            continue
         errors.append(
             _error_record(
                 None,
                 source,
                 "Review",
                 "incomplete_day",
-                f"하루 시간대 {count}/48개",
+                f"하루 시간대 {count}/{expected}개",
                 delivery_date=delivery_date,
                 area=area,
                 product=product,
