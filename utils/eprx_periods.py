@@ -12,7 +12,12 @@ MODERN_REGIME = "modern_30minute"
 LEGACY_PERIOD_COUNT = 8
 MODERN_PERIOD_COUNT = 48
 LEGACY_PERIOD_NOTICE = (
-    "해당 기간은 3시간 단위 8개 블록으로 거래된 과거 제도 자료입니다."
+    "2026년 3월 13일까지는 하루 8개, 3시간 단위 시간 블록으로 거래된 "
+    "과거 제도 자료입니다."
+)
+MIXED_PERIOD_NOTICE = (
+    "2026년 3월 13일까지는 하루 8개·3시간 단위, 3월 14일부터는 "
+    "하루 48개·30분 단위로 거래됩니다."
 )
 
 

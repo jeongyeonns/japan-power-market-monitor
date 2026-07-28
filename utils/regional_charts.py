@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+
+from utils.eprx_periods import LEGACY_REGIME
 
 AREA_NAMES = {
     "Tokyo": "도쿄",
@@ -30,6 +34,20 @@ def _display_data(profile: pd.DataFrame, areas: list[str]) -> pd.DataFrame:
     data = profile.loc[profile["area"].isin(areas)].copy()
     data["지역"] = data["area"].map(AREA_NAMES)
     return data
+
+
+def max_price_axis_upper(profile: pd.DataFrame) -> float:
+    """제도별 기본값과 실제 최고가격으로 차트 y축 상단만 결정합니다."""
+    regimes = set(profile.get("market_regime", pd.Series(dtype="object")).dropna())
+    base_upper = 20.0 if LEGACY_REGIME in regimes else 15.0
+    actual_max = pd.to_numeric(profile.get("max_price"), errors="coerce").max()
+    if pd.isna(actual_max) or actual_max <= base_upper:
+        return base_upper
+
+    expanded_upper = float(math.ceil(actual_max))
+    if expanded_upper <= actual_max:
+        expanded_upper += 1.0
+    return expanded_upper
 
 
 def _add_autoscale_hint(figure: go.Figure) -> None:
@@ -102,7 +120,7 @@ def area_max_price_chart(
             "<extra></extra>"
         )
     )
-    figure.update_yaxes(range=[0, 15], rangemode="tozero")
+    figure.update_yaxes(range=[0, max_price_axis_upper(data)], rangemode="tozero")
     _add_autoscale_hint(figure)
     return _finish(figure, f"평균 최고 낙찰가격 (전원 소재지별, {price_unit})")
 

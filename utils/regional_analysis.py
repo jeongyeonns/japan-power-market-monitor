@@ -13,6 +13,8 @@ from utils.eprx_periods import (
     LEGACY_REGIME,
     MODERN_PERIOD_COUNT,
     MODERN_REGIME,
+    expected_period_count,
+    market_regime,
 )
 from utils.weekly_aggregation import (
     add_week_columns,
@@ -69,9 +71,28 @@ def calculate_area_kpis(
     """한 지역의 실제 거래제도 블록 및 선택 주 원본으로 KPI를 계산합니다."""
     if area_profile.empty:
         return {label: np.nan for label in AREA_KPI_ORDER}
+    procurement_average = area_profile["procurement_volume"].mean()
+    bid_average = area_profile["bid_volume"].mean()
+    awarded_average = area_profile["awarded_volume"].mean()
     procurement_sum = area_profile["procurement_volume"].sum(min_count=1)
     bid_sum = area_profile["bid_volume"].sum(min_count=1)
     awarded_sum = area_profile["awarded_volume"].sum(min_count=1)
+
+    if "delivery_date" in raw_area_data.columns and not raw_area_data.empty:
+        regimes = set(
+            raw_area_data["delivery_date"].dropna().map(market_regime).unique()
+        )
+        if len(regimes) > 1:
+            daily_volume_means = raw_area_data.groupby("delivery_date")[
+                ["procurement_volume", "bid_volume", "awarded_volume"]
+            ].mean()
+            procurement_average = daily_volume_means["procurement_volume"].mean()
+            bid_average = daily_volume_means["bid_volume"].mean()
+            awarded_average = daily_volume_means["awarded_volume"].mean()
+            procurement_sum = daily_volume_means["procurement_volume"].sum(min_count=1)
+            bid_sum = daily_volume_means["bid_volume"].sum(min_count=1)
+            awarded_sum = daily_volume_means["awarded_volume"].sum(min_count=1)
+
     raw_awarded = raw_area_data["awarded_volume"].sum(min_count=1)
     weighted_price = safe_ratio(
         (raw_area_data["avg_price"] * raw_area_data["awarded_volume"]).sum(
@@ -80,9 +101,9 @@ def calculate_area_kpis(
         raw_awarded,
     )
     return {
-        "평균 모집량 (MW)": area_profile["procurement_volume"].mean(),
-        "평균 입찰량 (MW)": area_profile["bid_volume"].mean(),
-        "평균 낙찰량 (MW)": area_profile["awarded_volume"].mean(),
+        "평균 모집량 (MW)": procurement_average,
+        "평균 입찰량 (MW)": bid_average,
+        "평균 낙찰량 (MW)": awarded_average,
         "입찰경쟁률 (배)": safe_ratio(bid_sum, procurement_sum),
         "조달률 (%)": safe_ratio(awarded_sum, procurement_sum),
         "입찰 대비 낙찰률 (%)": safe_ratio(awarded_sum, bid_sum),
@@ -118,6 +139,7 @@ def validate_area_profile(
     area_profile: pd.DataFrame,
     selected_week_days: int,
     areas: tuple[str, ...] = DEFAULT_ANALYSIS_AREAS,
+    raw_week_data: pd.DataFrame | None = None,
 ) -> list[str]:
     """지역 존재·제도별 시간 블록·관측일 완전성을 검사합니다."""
     warnings: list[str] = []
@@ -144,7 +166,25 @@ def validate_area_profile(
             warnings.append(f"{display} 데이터가 없습니다.")
             continue
 
-        if "market_regime" in selected.columns:
+        raw_columns = {"area", "delivery_date", "period_no"}
+        raw_selected = pd.DataFrame()
+        if raw_week_data is not None and raw_columns.issubset(raw_week_data.columns):
+            raw_selected = raw_week_data.loc[raw_week_data["area"].eq(area)]
+
+        if not raw_selected.empty:
+            daily_counts = (
+                raw_selected.dropna(subset=["delivery_date"])
+                .groupby("delivery_date")["period_no"]
+                .nunique()
+            )
+            for delivery_date, actual_count in daily_counts.items():
+                expected_count = expected_period_count(delivery_date)
+                if actual_count != expected_count:
+                    warnings.append(
+                        f"{display} {pd.Timestamp(delivery_date):%Y-%m-%d} 시간대가 "
+                        f"{int(actual_count)}/{expected_count}개입니다."
+                    )
+        elif "market_regime" in selected.columns:
             for regime, expected_count in regime_period_counts.items():
                 regime_data = selected.loc[selected["market_regime"].eq(regime)]
                 if regime_data.empty:

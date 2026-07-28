@@ -12,7 +12,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from utils.eprx_loader import find_eprx_files, load_all_eprx_data
-from utils.eprx_periods import LEGACY_PERIOD_NOTICE, LEGACY_REGIME
+from utils.eprx_periods import (
+    LEGACY_PERIOD_NOTICE,
+    LEGACY_REGIME,
+    MIXED_PERIOD_NOTICE,
+)
 from utils.eprx_downloader import automation_approved, update_eprx_files
 from utils.jepx_loader import (
     AREA_DISPLAY as JEPX_AREA_DISPLAY,
@@ -1080,14 +1084,17 @@ def render_regional_analysis(
     if profile.empty:
         target.info("선택한 지역과 주차에 해당하는 EPRX 데이터가 없습니다.")
         return
+    selected_start = pd.Timestamp(selected_week).normalize()
+    raw_week = data.loc[data["week_start"].eq(selected_start)].copy()
     warnings = validate_area_profile(
-        profile, selected_week_days, areas=(selected_area,)
+        profile,
+        selected_week_days,
+        areas=(selected_area,),
+        raw_week_data=raw_week,
     )
     for message in warnings:
         target.warning(message)
 
-    selected_start = pd.Timestamp(selected_week).normalize()
-    raw_week = data.loc[data["week_start"].eq(selected_start)].copy()
     kpi_table = create_area_kpi_table(
         profile, raw_week, areas=[selected_area]
     )
@@ -1156,14 +1163,14 @@ def render_regional_analysis(
     regimes = set(profile["market_regime"].dropna())
     has_legacy_regime = LEGACY_REGIME in regimes
     mixed_regime_week = len(regimes) > 1
-    if has_legacy_regime:
-        target.info(LEGACY_PERIOD_NOTICE)
     if mixed_regime_week:
-        target.info(
-            "선택 주차에는 3시간 8개 블록과 30분 48개 블록 자료가 함께 "
-            "포함되어 있어, 서로 다른 시간대를 합산하지 않고 시간대별 그래프를 "
-            "표시하지 않습니다. KPI와 상세 표는 실제 원자료 블록 기준입니다."
+        target.caption(MIXED_PERIOD_NOTICE)
+        target.caption(
+            "서로 다른 시간 구조를 합산하거나 평균하지 않기 위해 시간대별 "
+            "그래프는 표시하지 않습니다. KPI와 상세 표는 실제 원자료 기준입니다."
         )
+    elif has_legacy_regime:
+        target.caption(LEGACY_PERIOD_NOTICE)
     else:
         target.caption("전원 소재지별 최고 낙찰가격의 선택 주차 동일 시간대 평균")
         target.plotly_chart(
