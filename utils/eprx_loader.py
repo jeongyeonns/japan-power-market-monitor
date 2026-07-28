@@ -433,21 +433,98 @@ def validate_eprx_data(data: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(errors, columns=ERROR_COLUMNS)
 
 
+DUPLICATE_KEY = ["delivery_date", "area", "original_product", "period_no"]
+STATUS_PRIORITY = {"確報値": 2, "速報値": 1}
+
+
+def _resolve_combined_duplicates(
+    data: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """중복 키마다 상태·수정시각 우선순위로 한 행만 결정합니다."""
+    stats = {
+        "duplicate_rows": 0,
+        "duplicate_groups": 0,
+        "removed_rows": 0,
+        "exact_duplicate_rows": 0,
+        "conflicting_groups": 0,
+    }
+    if data.empty:
+        return data.reindex(columns=NORMALIZED_COLUMNS), stats
+
+    working = data.copy()
+    duplicate_mask = working.duplicated(DUPLICATE_KEY, keep=False)
+    if duplicate_mask.any():
+        duplicate_data = working.loc[duplicate_mask]
+        stats["duplicate_rows"] = int(duplicate_mask.sum())
+        stats["duplicate_groups"] = int(
+            duplicate_data.groupby(DUPLICATE_KEY, dropna=False).ngroups
+        )
+        conflicts = (
+            duplicate_data.groupby(DUPLICATE_KEY, dropna=False)[
+                list(REQUIRED_METRICS)
+            ]
+            .nunique(dropna=False)
+            .gt(1)
+            .any(axis=1)
+        )
+        stats["conflicting_groups"] = int(conflicts.sum())
+
+    exact_columns = [
+        column
+        for column in NORMALIZED_COLUMNS
+        if column not in {"source_file", "duplicate_candidate"}
+    ]
+    stats["exact_duplicate_rows"] = int(
+        working.duplicated(exact_columns, keep="first").sum()
+    )
+    working["_status_priority"] = (
+        working["source_status"].map(STATUS_PRIORITY).fillna(0).astype(int)
+    )
+    working = working.sort_values(
+        [
+            *DUPLICATE_KEY,
+            "_status_priority",
+            "_source_modified_at_ns",
+            "_source_path",
+        ],
+        ascending=[True] * len(DUPLICATE_KEY) + [False, False, True],
+        kind="stable",
+        na_position="last",
+    )
+    resolved = working.drop_duplicates(DUPLICATE_KEY, keep="first").copy()
+    stats["removed_rows"] = len(working) - len(resolved)
+    resolved = resolved.drop(
+        columns=["_status_priority", "_source_modified_at_ns", "_source_path"],
+        errors="ignore",
+    )
+    resolved["duplicate_candidate"] = False
+    resolved = resolved.sort_values(
+        ["delivery_date", "area", "period_no"],
+        kind="stable",
+        na_position="last",
+    ).reset_index(drop=True)
+    resolved = resolved.reindex(columns=NORMALIZED_COLUMNS)
+    resolved.attrs["deduplication"] = stats
+    return resolved, stats
+
+
 def load_all_eprx_data(
     data_directory: str | Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """모든 지원 파일을 읽어 정규화 데이터, 오류, 파일 로그를 반환합니다."""
+    """모든 지원 파일을 개별 파싱해 중복 없이 날짜순으로 통합합니다."""
     normalized_frames: list[pd.DataFrame] = []
     file_errors: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
 
     for path in find_eprx_files(data_directory):
+        stat = path.stat()
         summary: dict[str, Any] = {
             "source_file": path.name,
             "file_type": path.suffix.lower().lstrip(".").upper(),
-            "file_size_bytes": path.stat().st_size,
-            "modified_at": pd.Timestamp(path.stat().st_mtime, unit="s", tz="Asia/Tokyo"),
+            "file_size_bytes": stat.st_size,
+            "modified_at": pd.Timestamp(stat.st_mtime, unit="s", tz="Asia/Tokyo"),
             "success": False,
+            "analysis_eligible": False,
             "encoding": None,
             "encoding_attempts": None,
             "delimiter": None,
@@ -472,8 +549,11 @@ def load_all_eprx_data(
                 }
             )
             normalized = normalize_eprx_data(raw, path)
+            normalized["_source_modified_at_ns"] = stat.st_mtime_ns
+            normalized["_source_path"] = str(path.resolve())
             summary["normalized_rows"] = len(normalized)
             summary["primary_reserve_rows"] = len(normalized)
+            summary["analysis_eligible"] = not normalized.empty
             normalized_frames.append(normalized)
             summary["success"] = True
         except Exception as exc:
@@ -487,17 +567,48 @@ def load_all_eprx_data(
             )
         summaries.append(summary)
 
-    combined = (
+    combined_before_resolution = (
         pd.concat(normalized_frames, ignore_index=True)
         if normalized_frames
-        else pd.DataFrame(columns=NORMALIZED_COLUMNS)
+        else pd.DataFrame(columns=[*NORMALIZED_COLUMNS, "_source_modified_at_ns", "_source_path"])
     )
-    if not combined.empty:
-        duplicate_key = ["delivery_date", "area", "original_product", "period_no"]
-        combined["duplicate_candidate"] = combined.duplicated(
-            duplicate_key, keep=False
+    if not combined_before_resolution.empty:
+        combined_before_resolution["duplicate_candidate"] = (
+            combined_before_resolution.duplicated(DUPLICATE_KEY, keep=False)
         )
-    validation = validate_eprx_data(combined)
+    validation = validate_eprx_data(combined_before_resolution)
+    combined, deduplication = _resolve_combined_duplicates(
+        combined_before_resolution
+    )
+    if deduplication["removed_rows"]:
+        file_errors.append(
+            _error_record(
+                None,
+                "통합 데이터",
+                "Review",
+                "duplicate_resolved",
+                (
+                    f"중복 키 {deduplication['duplicate_groups']}개에서 "
+                    f"{deduplication['removed_rows']}행을 제거했습니다. "
+                    "확정치를 우선하고 동일 상태는 수정시각이 최신인 파일을 "
+                    "사용했습니다."
+                ),
+            )
+        )
+    if deduplication["conflicting_groups"]:
+        file_errors.append(
+            _error_record(
+                None,
+                "통합 데이터",
+                "Review",
+                "conflicting_duplicate_resolved",
+                (
+                    f"수치가 다른 중복 {deduplication['conflicting_groups']}개 그룹을 "
+                    "평균·합산하지 않고 우선순위에 따라 한 행만 선택했습니다."
+                ),
+            )
+        )
+
     errors = pd.concat(
         [
             pd.DataFrame(file_errors, columns=ERROR_COLUMNS),
@@ -510,11 +621,11 @@ def load_all_eprx_data(
         for index, row in summary_frame.iterrows():
             file_mask = errors["source_file"].eq(row["source_file"])
             summary_frame.loc[index, "error_rows"] = int(file_mask.sum())
-            if not combined.empty:
+            if not combined_before_resolution.empty:
                 summary_frame.loc[index, "duplicate_rows"] = int(
                     (
-                        combined["source_file"].eq(row["source_file"])
-                        & combined["duplicate_candidate"]
+                        combined_before_resolution["source_file"].eq(row["source_file"])
+                        & combined_before_resolution["duplicate_candidate"]
                     ).sum()
                 )
     return combined, errors, summary_frame

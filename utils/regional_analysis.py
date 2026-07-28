@@ -1,4 +1,4 @@
-"""도쿄·중부 지역 상세분석의 KPI, 전주 비교, 규칙형 요약."""
+"""EPRX 지역별 상세분석의 KPI, 전주 비교, 규칙형 요약."""
 
 from __future__ import annotations
 
@@ -12,7 +12,14 @@ from utils.weekly_aggregation import (
     create_selected_area_weekly_profile,
 )
 
-AREA_DISPLAY = {"Tokyo": "도쿄", "Chubu": "중부"}
+AREA_DISPLAY = {
+    "Tokyo": "도쿄",
+    "Chubu": "중부",
+    "Hokuriku": "호쿠리쿠",
+    "Kansai": "간사이",
+    "Tohoku": "도호쿠",
+}
+DEFAULT_ANALYSIS_AREAS = ("Tokyo", "Chubu")
 AREA_KPI_ORDER = [
     "평균 모집량 (MW)",
     "평균 입찰량 (MW)",
@@ -69,24 +76,27 @@ def calculate_area_kpis(
 
 
 def create_area_kpi_table(
-    area_profile: pd.DataFrame, raw_week_data: pd.DataFrame
+    area_profile: pd.DataFrame,
+    raw_week_data: pd.DataFrame,
+    areas: tuple[str, ...] = DEFAULT_ANALYSIS_AREAS,
 ) -> pd.DataFrame:
-    """도쿄·중부 KPI와 중부−도쿄 차이를 표로 반환합니다."""
+    """요청한 지역의 KPI를 기존 공통 산식으로 계산해 반환합니다."""
     values: dict[str, dict[str, float]] = {}
-    for area in ("Tokyo", "Chubu"):
+    for area in areas:
         values[AREA_DISPLAY[area]] = calculate_area_kpis(
             area_profile.loc[area_profile["area"].eq(area)],
             raw_week_data.loc[raw_week_data["area"].eq(area)],
         )
     table = pd.DataFrame(values).reindex(AREA_KPI_ORDER)
-    table["중부−도쿄 차이"] = table["중부"] - table["도쿄"]
+    if areas == DEFAULT_ANALYSIS_AREAS:
+        table["중부−도쿄 차이"] = table["중부"] - table["도쿄"]
     return table
 
 
 def validate_area_profile(
     area_profile: pd.DataFrame,
     selected_week_days: int,
-    areas: tuple[str, ...] = ("Tokyo", "Chubu"),
+    areas: tuple[str, ...] = DEFAULT_ANALYSIS_AREAS,
 ) -> list[str]:
     """지역 존재·48개 시간대·7일 관측·필수 열을 검사합니다."""
     warnings: list[str] = []
@@ -141,8 +151,9 @@ def calculate_previous_week_comparison(
     data: pd.DataFrame,
     selected_week: object,
     current_profile: pd.DataFrame,
+    areas: tuple[str, ...] = DEFAULT_ANALYSIS_AREAS,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """도쿄·중부 현재 주와 직전 보유 주의 KPI 변화표를 반환합니다."""
+    """요청한 지역의 현재 주와 직전 보유 주 KPI 변화표를 반환합니다."""
     prepared = add_week_columns(data)
     selected = pd.Timestamp(selected_week).normalize()
     previous_week, previous_days = find_previous_week(prepared, selected)
@@ -157,7 +168,7 @@ def calculate_previous_week_comparison(
     current_raw = prepared.loc[prepared["week_start"].eq(selected)]
     previous_raw = prepared.loc[prepared["week_start"].eq(previous_week)]
     previous_profile = create_selected_area_weekly_profile(
-        prepared, previous_week, ["Tokyo", "Chubu"]
+        prepared, previous_week, list(areas)
     )
     metrics = [
         "최고 낙찰가격",
@@ -169,7 +180,7 @@ def calculate_previous_week_comparison(
         "미조달 시간대 수",
     ]
     rows: list[dict[str, Any]] = []
-    for area in ("Tokyo", "Chubu"):
+    for area in areas:
         current = calculate_area_kpis(
             current_profile.loc[current_profile["area"].eq(area)],
             current_raw.loc[current_raw["area"].eq(area)],

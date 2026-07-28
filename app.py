@@ -88,6 +88,13 @@ ZONE_COLORS = {"50Hz": "#1f77b4", "60Hz": "#d62728"}
 
 DATA_SOURCE_ACTUAL = "실제 EPRX 파일"
 DATA_SOURCE_SAMPLE = "샘플 데이터"
+EPRX_REGION_OPTIONS = {
+    "도쿄": "Tokyo",
+    "중부": "Chubu",
+    "호쿠리쿠": "Hokuriku",
+    "간사이": "Kansai",
+    "도호쿠": "Tohoku",
+}
 DISPLAY_AREA_NAMES = {
     "Hokkaido": "홋카이도",
     "Tohoku": "도호쿠",
@@ -459,7 +466,10 @@ def show_eprx_source_information(
     """분석 아래에서 데이터 출처와 원본 파일 메타데이터를 표시합니다."""
     actual = data_source == DATA_SOURCE_ACTUAL
     successful = (
-        file_summary.loc[file_summary["success"].fillna(False)].copy()
+        file_summary.loc[
+            file_summary["success"].fillna(False)
+            & file_summary["primary_reserve_rows"].fillna(0).gt(0)
+        ].copy()
         if actual and not file_summary.empty
         else pd.DataFrame()
     )
@@ -486,7 +496,7 @@ def show_eprx_source_information(
                     ("가격 단위", price_unit),
                     ("물량 단위", volume_unit),
                     ("정규화 행 수", f"{len(data):,}행"),
-                    ("지원 파일 수", f"{len(successful):,}개" if actual else "해당 없음"),
+                    ("로드한 EPRX 파일 수", f"{len(successful):,}개" if actual else "해당 없음"),
                 ],
                 columns=["항목", "내용"],
             ),
@@ -643,7 +653,7 @@ def render_national_summary(summary_data: dict, target=st) -> None:
 
 
 def render_regional_summary(summary_data: dict, target=st) -> None:
-    """도쿄·중부 규칙 기반 요약을 항목형 Markdown 카드로 표시합니다."""
+    """EPRX 지역별 규칙 기반 요약을 항목형 Markdown 카드로 표시합니다."""
     if summary_data.get("incomplete"):
         target.warning(
             "일부 지역 또는 시간대 데이터가 불완전하므로 아래 요약은 참고용입니다."
@@ -1045,33 +1055,35 @@ def render_regional_analysis(
     selected_week_days: int,
     price_unit: str,
 ) -> None:
-    """도쿄·중부 지역 상세분석 탭을 표시합니다."""
-    view_options = {
-        "도쿄": ["Tokyo"],
-        "중부": ["Chubu"],
-    }
+    """선택한 EPRX 지역의 상세분석을 표시합니다."""
+    target.subheader("지역별 분석")
     view = target.radio(
-        "보기 방식",
-        list(view_options),
+        "분석할 지역을 선택하세요.",
+        list(EPRX_REGION_OPTIONS),
         horizontal=True,
         key="regional_view_mode",
     )
-    visible_areas = view_options[view]
+    selected_area = EPRX_REGION_OPTIONS[view]
+    visible_areas = [selected_area]
     profile = create_selected_area_weekly_profile(
-        data, selected_week, ["Tokyo", "Chubu"]
+        data, selected_week, visible_areas
     )
-    warnings = validate_area_profile(profile, selected_week_days)
+    if profile.empty:
+        target.info("선택한 지역과 주차에 해당하는 EPRX 데이터가 없습니다.")
+        return
+    warnings = validate_area_profile(
+        profile, selected_week_days, areas=(selected_area,)
+    )
     for message in warnings:
         target.warning(message)
-    if profile.empty:
-        target.info("도쿄·중부 지역 상세 데이터를 표시할 수 없습니다.")
-        return
 
     selected_start = pd.Timestamp(selected_week).normalize()
     raw_week = data.loc[data["week_start"].eq(selected_start)].copy()
-    kpi_table = create_area_kpi_table(profile, raw_week)
+    kpi_table = create_area_kpi_table(
+        profile, raw_week, areas=(selected_area,)
+    )
     previous, previous_meta = calculate_previous_week_comparison(
-        data, selected_week, profile
+        data, selected_week, profile, areas=(selected_area,)
     )
     if previous_meta["previous_week"] is None:
         target.info("비교 가능한 이전 주차가 없습니다.")
@@ -1117,7 +1129,7 @@ def render_regional_analysis(
 
     if not over_rate.empty:
         source_over = raw_week.loc[
-            raw_week["area"].isin(["Tokyo", "Chubu"])
+            raw_week["area"].isin(visible_areas)
             & (
                 raw_week["awarded_volume"]
                 > raw_week["procurement_volume"]
@@ -1262,9 +1274,8 @@ def render_regional_analysis(
     )
     with target.expander("데이터 기준 설명"):
         st.markdown(
-            """
-- 도쿄: 50Hz권역에 속하는 개별 지역
-- 중부: 60Hz권역에 속하는 개별 지역
+            f"""
+- 선택 지역: {view}
 - 전원 소재지별: 해당 지역에 위치한 발전기·ESS 등 전원의 입찰 및 낙찰 결과
 - 일반송배전사업자(TSO)별: 해당 지역 일반송배전사업자의 모집 및 조달 결과
 - 낙찰가격·입찰량·낙찰량은 전원 소재지별
@@ -1658,7 +1669,7 @@ if data_source == DATA_SOURCE_ACTUAL:
         st.stop()
     failed = file_summary.loc[~file_summary["success"].fillna(False)]
     if data.empty:
-        st.error("실제 EPRX 파일을 정규화하지 못했습니다. 아래 진단을 확인하세요.")
+        st.error("분석 가능한 EPRX 데이터 파일이 없습니다.")
         show_diagnostics(file_summary, error_data)
         st.stop()
     if not failed.empty:
