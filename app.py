@@ -13,9 +13,12 @@ import streamlit as st
 
 from utils.eprx_loader import find_eprx_files, load_all_eprx_data
 from utils.eprx_periods import (
+    EPRX_REFORM_DATE,
     LEGACY_PERIOD_NOTICE,
     LEGACY_REGIME,
+    LEGACY_SEGMENT_NOTICE,
     MIXED_PERIOD_NOTICE,
+    MODERN_SEGMENT_NOTICE,
 )
 from utils.eprx_downloader import automation_approved, update_eprx_files
 from utils.jepx_loader import (
@@ -1061,6 +1064,113 @@ def render_national_overview(
         )
 
 
+def _format_eprx_segment_title(
+    segment_data: pd.DataFrame, regime_label: str
+) -> str:
+    """실제 거래일 범위로 혼합 주차의 구간 제목을 만듭니다."""
+    dates = pd.to_datetime(segment_data["delivery_date"].dropna())
+    start = dates.min()
+    end = dates.max()
+    if start.month == end.month:
+        date_label = f"{start.month}월 {start.day}일~{end.day}일"
+    else:
+        date_label = (
+            f"{start.month}월 {start.day}일~{end.month}월 {end.day}일"
+        )
+    return f"{date_label}: {regime_label} 시간대별 분석"
+
+
+def _render_eprx_time_charts(
+    target,
+    segment_profile: pd.DataFrame,
+    visible_areas: list[str],
+    price_unit: str,
+    heading: str | None = None,
+    notice: str | None = None,
+) -> None:
+    """하나의 거래제도 구간에 대한 두 시간대 그래프를 공통 렌더링합니다."""
+    if heading:
+        target.markdown(f"#### {heading}")
+    if notice:
+        target.caption(notice)
+    target.caption("전원 소재지별 최고 낙찰가격의 동일 시간대 평균")
+    target.plotly_chart(
+        area_max_price_chart(segment_profile, visible_areas, price_unit),
+        width="stretch",
+    )
+    target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
+    target.plotly_chart(
+        area_award_rate_chart(segment_profile, visible_areas), width="stretch"
+    )
+
+
+def _prepare_eprx_detail_table(
+    profile: pd.DataFrame, visible_areas: list[str], price_unit: str
+) -> pd.DataFrame:
+    """선택 제도 구간의 시간대 상세 표를 화면용 열로 변환합니다."""
+    detailed = profile.loc[profile["area"].isin(visible_areas)].copy()
+    detailed["area"] = detailed["area"].map(AREA_DISPLAY)
+    detailed["completeness_flag"] = detailed["completeness_flag"].replace(
+        {"Complete": "데이터 완전", "Incomplete": "데이터 불완전"}
+    )
+    detailed = detailed[
+        [
+            "area",
+            "period_no",
+            "period_start",
+            "procurement_volume",
+            "bid_volume",
+            "awarded_volume",
+            "max_price",
+            "avg_price",
+            "min_price",
+            "award_rate",
+            "excess_bid_volume",
+            "observation_count",
+            "completeness_flag",
+        ]
+    ].rename(
+        columns={
+            "area": "지역",
+            "period_no": "시간대 번호",
+            "period_start": "시작시간",
+            "procurement_volume": "모집량 (MW)",
+            "bid_volume": "입찰량 (MW)",
+            "awarded_volume": "낙찰량 (MW)",
+            "max_price": f"최고 낙찰가격 ({price_unit})",
+            "avg_price": f"평균 낙찰가격 ({price_unit})",
+            "min_price": f"최저 낙찰가격 ({price_unit})",
+            "award_rate": "입찰 대비 낙찰률",
+            "excess_bid_volume": "초과입찰량 (MW)",
+            "observation_count": "관측일수",
+            "completeness_flag": "데이터 완전성",
+        }
+    )
+    return detailed
+
+
+def _render_eprx_detail_table(
+    target, detailed: pd.DataFrame, price_unit: str
+) -> None:
+    """하나의 거래제도 구간 상세 표를 동일한 숫자 형식으로 표시합니다."""
+    target.dataframe(
+        detailed.style.format(
+            {
+                "모집량 (MW)": "{:,.2f}",
+                "입찰량 (MW)": "{:,.2f}",
+                "낙찰량 (MW)": "{:,.2f}",
+                f"최고 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"평균 낙찰가격 ({price_unit})": "{:,.2f}",
+                f"최저 낙찰가격 ({price_unit})": "{:,.2f}",
+                "입찰 대비 낙찰률": "{:.2%}",
+                "초과입찰량 (MW)": "{:,.2f}",
+            },
+            na_rep="계산 불가",
+        ),
+        width="stretch",
+    )
+
+
 def render_regional_analysis(
     target,
     data: pd.DataFrame,
@@ -1163,22 +1273,47 @@ def render_regional_analysis(
     regimes = set(profile["market_regime"].dropna())
     has_legacy_regime = LEGACY_REGIME in regimes
     mixed_regime_week = len(regimes) > 1
+    detail_segments: list[tuple[str | None, pd.DataFrame]] = []
     if mixed_regime_week:
         target.caption(MIXED_PERIOD_NOTICE)
-        target.caption(
-            "서로 다른 시간 구조를 합산하거나 평균하지 않기 위해 시간대별 "
-            "그래프는 표시하지 않습니다. KPI와 상세 표는 실제 원자료 기준입니다."
-        )
+        selected_raw = raw_week.loc[raw_week["area"].eq(selected_area)].copy()
+        segment_specs = [
+            (
+                "구제도",
+                LEGACY_SEGMENT_NOTICE,
+                selected_raw["delivery_date"].lt(EPRX_REFORM_DATE),
+            ),
+            (
+                "신제도",
+                MODERN_SEGMENT_NOTICE,
+                selected_raw["delivery_date"].ge(EPRX_REFORM_DATE),
+            ),
+        ]
+        for regime_label, notice, date_mask in segment_specs:
+            segment_raw = selected_raw.loc[date_mask].copy()
+            segment_profile = create_selected_area_weekly_profile(
+                segment_raw, selected_week, visible_areas
+            )
+            if segment_profile.empty:
+                continue
+            heading = _format_eprx_segment_title(segment_raw, regime_label)
+            detail_segments.append((heading, segment_profile))
+            _render_eprx_time_charts(
+                target,
+                segment_profile,
+                visible_areas,
+                price_unit,
+                heading=heading,
+                notice=notice,
+            )
     else:
-        if has_legacy_regime:
-            target.caption(LEGACY_PERIOD_NOTICE)
-        target.caption("전원 소재지별 최고 낙찰가격의 선택 주차 동일 시간대 평균")
-        target.plotly_chart(
-            area_max_price_chart(profile, visible_areas, price_unit), width="stretch"
-        )
-        target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
-        target.plotly_chart(
-            area_award_rate_chart(profile, visible_areas), width="stretch"
+        detail_segments.append((None, profile))
+        _render_eprx_time_charts(
+            target,
+            profile,
+            visible_areas,
+            price_unit,
+            notice=LEGACY_PERIOD_NOTICE if has_legacy_regime else None,
         )
 
     target.subheader("전주 대비 변화")
@@ -1226,80 +1361,23 @@ def render_regional_analysis(
         render_hierarchical_metric_table(target, previous_display)
 
     target.subheader(f"{view} 시간대별 상세 데이터")
-    detailed = profile.loc[profile["area"].isin(visible_areas)].copy()
-    detailed["area"] = detailed["area"].map(AREA_DISPLAY)
-    detailed["completeness_flag"] = detailed["completeness_flag"].replace(
-        {"Complete": "데이터 완전", "Incomplete": "데이터 불완전"}
-    )
-    detailed = detailed[
-        [
-            "area",
-            "period_no",
-            "period_start",
-            "procurement_volume",
-            "bid_volume",
-            "awarded_volume",
-            "max_price",
-            "avg_price",
-            "min_price",
-            "award_rate",
-            "excess_bid_volume",
-            "observation_count",
-            "completeness_flag",
-        ]
-    ].rename(
-        columns={
-            "area": "지역",
-            "period_no": "시간대 번호",
-            "period_start": "시작시간",
-            "procurement_volume": "모집량 (TSO별, MW)",
-            "bid_volume": "입찰량 (전원 소재지별, MW)",
-            "awarded_volume": "낙찰량 (전원 소재지별, MW)",
-            "max_price": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
-            "avg_price": f"평균 낙찰가격 (전원 소재지별, {price_unit})",
-            "min_price": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
-            "award_rate": "입찰 대비 낙찰률 (전원 소재지별)",
-            "excess_bid_volume": "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)",
-            "observation_count": "관측일수",
-            "completeness_flag": "데이터 완전성",
-        }
-    )
-    detailed = detailed.rename(
-        columns={
-            "모집량 (TSO별, MW)": "모집량 (MW)",
-            "입찰량 (전원 소재지별, MW)": "입찰량 (MW)",
-            "낙찰량 (전원 소재지별, MW)": "낙찰량 (MW)",
-            f"최고 낙찰가격 (전원 소재지별, {price_unit})": f"최고 낙찰가격 ({price_unit})",
-            f"평균 낙찰가격 (전원 소재지별, {price_unit})": f"평균 낙찰가격 ({price_unit})",
-            f"최저 낙찰가격 (전원 소재지별, {price_unit})": f"최저 낙찰가격 ({price_unit})",
-            "입찰 대비 낙찰률 (전원 소재지별)": "입찰 대비 낙찰률",
-            "초과입찰량 (소재지별 입찰량 − TSO별 모집량, MW)": "초과입찰량 (MW)",
-        }
-    )
     target.caption(
         "데이터 기준: 모집량은 TSO별, 입찰량·낙찰량·낙찰가격은 전원 소재지별입니다. "
         "입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다."
     )
     target.caption(
         "최고·평균·최저 낙찰가격은 각 날짜에 공표된 값을 동일 시간대별로 모아 "
-        "선택 주차 단위로 평균한 값입니다."
+        "선택 주차 또는 제도 구간 단위로 평균한 값입니다."
     )
-    target.dataframe(
-        detailed.style.format(
-            {
-                "모집량 (MW)": "{:,.2f}",
-                "입찰량 (MW)": "{:,.2f}",
-                "낙찰량 (MW)": "{:,.2f}",
-                f"최고 낙찰가격 ({price_unit})": "{:,.2f}",
-                f"평균 낙찰가격 ({price_unit})": "{:,.2f}",
-                f"최저 낙찰가격 ({price_unit})": "{:,.2f}",
-                "입찰 대비 낙찰률": "{:.2%}",
-                "초과입찰량 (MW)": "{:,.2f}",
-            },
-            na_rep="계산 불가",
-        ),
-        width="stretch",
-    )
+    for segment_heading, segment_profile in detail_segments:
+        if segment_heading:
+            target.markdown(
+                f"#### {segment_heading.replace('시간대별 분석', '상세 데이터')}"
+            )
+        detailed = _prepare_eprx_detail_table(
+            segment_profile, visible_areas, price_unit
+        )
+        _render_eprx_detail_table(target, detailed, price_unit)
     with target.expander("데이터 기준 설명"):
         st.markdown(
             f"""
