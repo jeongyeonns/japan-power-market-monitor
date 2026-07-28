@@ -1080,7 +1080,7 @@ def render_regional_analysis(
     selected_start = pd.Timestamp(selected_week).normalize()
     raw_week = data.loc[data["week_start"].eq(selected_start)].copy()
     kpi_table = create_area_kpi_table(
-        profile, raw_week, areas=(selected_area,)
+        profile, raw_week, areas=[selected_area]
     )
     previous, previous_meta = calculate_previous_week_comparison(
         data, selected_week, profile, areas=(selected_area,)

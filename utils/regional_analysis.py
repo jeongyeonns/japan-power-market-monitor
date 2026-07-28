@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -20,6 +21,19 @@ AREA_DISPLAY = {
     "Tohoku": "도호쿠",
 }
 DEFAULT_ANALYSIS_AREAS = ("Tokyo", "Chubu")
+
+
+def _normalize_analysis_areas(
+    areas: str | Iterable[str] | None,
+) -> tuple[str, ...]:
+    """단일 지역 문자열과 지역 목록을 동일한 튜플 형태로 정규화합니다."""
+    if areas is None:
+        return DEFAULT_ANALYSIS_AREAS
+    if isinstance(areas, str):
+        return (areas,)
+    return tuple(areas)
+
+
 AREA_KPI_ORDER = [
     "평균 모집량 (MW)",
     "평균 입찰량 (MW)",
@@ -78,17 +92,18 @@ def calculate_area_kpis(
 def create_area_kpi_table(
     area_profile: pd.DataFrame,
     raw_week_data: pd.DataFrame,
-    areas: tuple[str, ...] = DEFAULT_ANALYSIS_AREAS,
+    areas: str | Iterable[str] | None = None,
 ) -> pd.DataFrame:
     """요청한 지역의 KPI를 기존 공통 산식으로 계산해 반환합니다."""
+    selected_areas = _normalize_analysis_areas(areas)
     values: dict[str, dict[str, float]] = {}
-    for area in areas:
+    for area in selected_areas:
         values[AREA_DISPLAY[area]] = calculate_area_kpis(
             area_profile.loc[area_profile["area"].eq(area)],
             raw_week_data.loc[raw_week_data["area"].eq(area)],
         )
     table = pd.DataFrame(values).reindex(AREA_KPI_ORDER)
-    if areas == DEFAULT_ANALYSIS_AREAS:
+    if selected_areas == DEFAULT_ANALYSIS_AREAS:
         table["중부−도쿄 차이"] = table["중부"] - table["도쿄"]
     return table
 
