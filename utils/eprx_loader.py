@@ -15,22 +15,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.eprx_areas import EPRX_JAPANESE_AREAS
 from utils.eprx_periods import expected_period_count, period_start_label
 from utils.sample_data import AREAS_BY_ZONE, AREA_TO_ZONE
 
 SUPPORTED_SUFFIXES = {".csv", ".xlsx", ".xls"}
 ENCODING_CANDIDATES = ("cp932", "shift_jis", "utf-8-sig", "utf-8")
-JAPANESE_AREAS = {
-    "北海道": "Hokkaido",
-    "東北": "Tohoku",
-    "東京": "Tokyo",
-    "中部": "Chubu",
-    "北陸": "Hokuriku",
-    "関西": "Kansai",
-    "中国": "Chugoku",
-    "四国": "Shikoku",
-    "九州": "Kyushu",
-}
+JAPANESE_AREAS = EPRX_JAPANESE_AREAS
+
 METRIC_MAP = {
     "募集量（TSO別）[MW]": "procurement_volume",
     "応札量合計（電源属地別）[MW]": "bid_volume",

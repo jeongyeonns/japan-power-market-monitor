@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.eprx_areas import EPRX_AREA_DISPLAY
 from utils.eprx_periods import (
     LEGACY_PERIOD_COUNT,
     LEGACY_REGIME,
@@ -21,13 +22,8 @@ from utils.weekly_aggregation import (
     create_selected_area_weekly_profile,
 )
 
-AREA_DISPLAY = {
-    "Tokyo": "도쿄",
-    "Chubu": "중부",
-    "Hokuriku": "호쿠리쿠",
-    "Kansai": "간사이",
-    "Tohoku": "도호쿠",
-}
+AREA_DISPLAY = EPRX_AREA_DISPLAY
+
 DEFAULT_ANALYSIS_AREAS = ("Tokyo", "Chubu")
 
 

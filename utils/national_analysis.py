@@ -7,21 +7,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.eprx_areas import EPRX_AREA_DISPLAY
 from utils.regional_analysis import AREA_DISPLAY, safe_ratio
 from utils.sample_data import AREAS_BY_ZONE
 
 EXPECTED_AREAS = [area for areas in AREAS_BY_ZONE.values() for area in areas]
-ALL_AREA_DISPLAY = {
-    "Hokkaido": "홋카이도",
-    "Tohoku": "도호쿠",
-    "Tokyo": "도쿄",
-    "Chubu": "중부",
-    "Hokuriku": "호쿠리쿠",
-    "Kansai": "간사이",
-    "Chugoku": "주고쿠",
-    "Shikoku": "시코쿠",
-    "Kyushu": "규슈",
-}
+ALL_AREA_DISPLAY = EPRX_AREA_DISPLAY
+
 NATIONAL_KPI_LABELS = [
     "평균 모집량 (MW)",
     "평균 입찰량 (MW)",

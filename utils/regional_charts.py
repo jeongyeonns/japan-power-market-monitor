@@ -8,22 +8,12 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from utils.eprx_areas import EPRX_AREA_COLORS, EPRX_AREA_DISPLAY
 from utils.eprx_periods import LEGACY_REGIME
 
-AREA_NAMES = {
-    "Tokyo": "도쿄",
-    "Chubu": "중부",
-    "Hokuriku": "호쿠리쿠",
-    "Kansai": "간사이",
-    "Tohoku": "도호쿠",
-}
-AREA_COLORS = {
-    "도쿄": "#1f77b4",
-    "중부": "#d62728",
-    "호쿠리쿠": "#2ca02c",
-    "간사이": "#9467bd",
-    "도호쿠": "#ff7f0e",
-}
+AREA_NAMES = EPRX_AREA_DISPLAY
+AREA_COLORS = EPRX_AREA_COLORS
+
 PERIOD_ORDER = [
     f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 30)
 ]

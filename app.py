@@ -11,6 +11,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from utils.eprx_areas import EPRX_AREA_DISPLAY, EPRX_AREA_OPTIONS
 from utils.eprx_loader import find_eprx_files, load_all_eprx_data
 from utils.eprx_periods import (
     EPRX_REFORM_DATE,
@@ -96,24 +97,8 @@ ZONE_COLORS = {"50Hz": "#1f77b4", "60Hz": "#d62728"}
 
 DATA_SOURCE_ACTUAL = "실제 EPRX 파일"
 DATA_SOURCE_SAMPLE = "샘플 데이터"
-EPRX_REGION_OPTIONS = {
-    "도쿄": "Tokyo",
-    "중부": "Chubu",
-    "호쿠리쿠": "Hokuriku",
-    "간사이": "Kansai",
-    "도호쿠": "Tohoku",
-}
-DISPLAY_AREA_NAMES = {
-    "Hokkaido": "홋카이도",
-    "Tohoku": "도호쿠",
-    "Tokyo": "도쿄",
-    "Chubu": "주부",
-    "Hokuriku": "호쿠리쿠",
-    "Kansai": "간사이",
-    "Chugoku": "주고쿠",
-    "Shikoku": "시코쿠",
-    "Kyushu": "규슈",
-}
+EPRX_REGION_OPTIONS = EPRX_AREA_OPTIONS
+DISPLAY_AREA_NAMES = EPRX_AREA_DISPLAY
 
 
 def deployment_file_diagnostics(
