@@ -119,3 +119,89 @@ def create_tokyo_chubu_charge_discharge_chart(daily, area_names):
             "discharge_start", "discharge_end",
         ],
     )
+
+def create_selected_area_daily_spread_chart(daily, area_names, area):
+    """선택한 한 지역의 일별 ESS 스프레드만 표시합니다."""
+    data = daily[daily["area"].eq(area)].copy()
+    display = area_names.get(area, area)
+    data["지역"] = display
+    figure = px.line(
+        data,
+        x="delivery_date",
+        y="spread",
+        color="지역",
+        markers=True,
+        title=f"{display} 일별 ESS 스프레드 추이",
+        labels={"delivery_date": "날짜", "spread": "스프레드 (엔/kWh)"},
+        hover_data={
+            "charge_average_price": ":.2f",
+            "discharge_average_price": ":.2f",
+            "charge_start": True,
+            "discharge_start": True,
+            "completeness_flag": True,
+        },
+    )
+    figure.update_traces(connectgaps=False, line={"width": 2}, marker={"size": 6})
+    figure.update_layout(hovermode="x unified")
+    return figure
+
+
+def create_selected_area_price_profile_chart(profile, area_names, area):
+    """선택한 한 지역의 주간 시간대별 평균 가격만 표시합니다."""
+    data = profile[profile["area"].eq(area)].copy()
+    display = area_names.get(area, area)
+    data["지역"] = display
+    return px.line(
+        data,
+        x="period_start",
+        y="mean_price",
+        color="지역",
+        markers=True,
+        title=f"{display} 시간대별 평균 전력가격",
+        labels={"period_start": "시간대", "mean_price": "평균 전력가격 (엔/kWh)"},
+        hover_data={
+            "min_price": ":.2f",
+            "max_price": ":.2f",
+            "observation_days": True,
+        },
+    )
+
+
+def create_selected_area_charge_discharge_chart(daily, area_names, area):
+    """선택한 한 지역의 일별 충전·방전 평균가격을 표시합니다."""
+    data = daily[daily["area"].eq(area)].copy()
+    display = area_names.get(area, area)
+    long = data.melt(
+        id_vars=[
+            "delivery_date",
+            "spread",
+            "charge_start",
+            "charge_end",
+            "discharge_start",
+            "discharge_end",
+        ],
+        value_vars=["charge_average_price", "discharge_average_price"],
+        var_name="price_type",
+        value_name="price",
+    )
+    long["가격 구분"] = long["price_type"].map(
+        {"charge_average_price": "충전가격", "discharge_average_price": "방전가격"}
+    )
+    long["계열"] = display + " " + long["가격 구분"]
+    return px.line(
+        long,
+        x="delivery_date",
+        y="price",
+        color="계열",
+        markers=True,
+        title=f"{display} 일별 충전·방전 가격",
+        labels={"delivery_date": "날짜", "price": "가격 (엔/kWh)"},
+        hover_data=[
+            "가격 구분",
+            "spread",
+            "charge_start",
+            "charge_end",
+            "discharge_start",
+            "discharge_end",
+        ],
+    )

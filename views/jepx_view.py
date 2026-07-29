@@ -8,19 +8,26 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from utils.jepx_areas import (
+    JEPX_DETAIL_AREA_OPTIONS,
+    JEPX_NATIONAL_AREA_DISPLAY_ORDER,
+)
 from utils.jepx_charts import (
-    create_area_spread_bar_chart, create_charge_discharge_price_chart,
-    create_daily_spread_chart, create_time_frequency_chart,
-    create_tokyo_chubu_charge_discharge_chart,
-    create_tokyo_chubu_daily_spread_chart,
-    create_tokyo_chubu_price_profile_chart, create_weekly_price_profile_chart,
+    create_area_spread_bar_chart,
+    create_charge_discharge_price_chart,
+    create_daily_spread_chart,
+    create_selected_area_charge_discharge_chart,
+    create_selected_area_daily_spread_chart,
+    create_selected_area_price_profile_chart,
+    create_time_frequency_chart,
+    create_weekly_price_profile_chart,
 )
 from utils.jepx_weekly_analysis import (
     calculate_charge_discharge_time_frequency, calculate_week_over_week,
-    calculate_tokyo_chubu_week_over_week,
-    calculate_tokyo_chubu_weekly_comparison,
+    calculate_selected_area_week_over_week,
+    calculate_selected_area_weekly_comparison,
     calculate_weekly_area_kpis, compare_area_price_series,
-    create_area_price_spread_comparison, create_tokyo_chubu_price_profile,
+    create_area_price_spread_comparison, create_selected_area_price_profile,
     filter_weekly_spreads,
     format_spread_change, initial_daily_spread_areas,
     order_daily_spread_areas, resolve_daily_spread_areas,
@@ -37,18 +44,7 @@ ANALYSIS_WEEK_HELP_TEXT = (
     "분석하려는 주차를 선택해 주세요. "
     "정확한 비교를 위해 ‘데이터 완전’으로 표시된 주차를 권장합니다."
 )
-JEPX_AREA_DISPLAY_ORDER = {
-    "System": 0,
-    "Hokkaido": 1,
-    "Tohoku": 2,
-    "Tokyo": 3,
-    "Chubu": 4,
-    "Hokuriku": 5,
-    "Kansai": 6,
-    "Shikoku": 7,
-    "Chugoku": 8,
-    "Kyushu": 9,
-}
+JEPX_AREA_DISPLAY_ORDER = JEPX_NATIONAL_AREA_DISPLAY_ORDER
 
 
 def render_jepx_validation(long_data, spread_results_provider, area_names):
@@ -166,43 +162,58 @@ def _most_frequent_times(frequency, area, kind):
     return ", ".join(times) if times else "계산 불가", maximum
 
 
-def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_names):
-    """기존 JEPX 계산 결과를 이용한 도쿄·중부 전용 비교 화면."""
+def render_jepx_area_analysis(long_data, spread_results_provider, area_names):
+    """JEPX 9개 지역 중 선택한 한 지역의 주간 분석을 표시합니다."""
     weeks, complete_weeks, default_week = _jepx_week_options(long_data)
-    controls = st.columns(3)
+    controls = st.columns([2, 1, 1, 1])
     week = controls[0].selectbox(
         "분석 주차",
         weeks,
         index=default_week,
         format_func=lambda value: _format_week_option(value, complete_weeks),
-        key="jepx_tokyo_chubu_week",
+        key="jepx_detail_week",
     )
     controls[0].caption(ANALYSIS_WEEK_HELP_TEXT)
-    duration = controls[1].selectbox(
+    area_label = controls[1].selectbox(
+        "분석할 지역을 선택하세요.",
+        list(JEPX_DETAIL_AREA_OPTIONS),
+        index=0,
+        key="jepx_detail_area",
+    )
+    selected_area = JEPX_DETAIL_AREA_OPTIONS[area_label]
+    duration = controls[2].selectbox(
         "ESS 운용시간",
         [1, 2, 4],
         index=1,
         format_func=lambda value: f"{value}시간",
-        key="jepx_tokyo_chubu_duration",
+        key="jepx_detail_duration",
     )
-    mode_label = controls[2].selectbox(
-        "계산방식", list(MODE_LABELS), key="jepx_tokyo_chubu_operation_mode"
+    mode_label = controls[3].selectbox(
+        "계산방식", list(MODE_LABELS), key="jepx_detail_operation_mode"
     )
     mode = MODE_LABELS[mode_label]
+
+    week_start = pd.Timestamp(week).normalize()
+    week_end = week_start + pd.Timedelta(days=6)
+    selected_prices = long_data.loc[
+        long_data["area"].eq(selected_area)
+        & pd.to_datetime(long_data["delivery_date"]).between(week_start, week_end)
+    ].copy()
+    if selected_prices.empty:
+        st.info("선택한 지역과 주차에 해당하는 JEPX 데이터가 없습니다.")
+        return
+
     all_daily = spread_results_provider(duration, mode)
     weekly = filter_weekly_spreads(all_daily, week)
-    weekly = weekly[weekly["area"].isin(["Tokyo", "Chubu"])].copy()
-    comparison = calculate_tokyo_chubu_weekly_comparison(
-        long_data, all_daily, week, duration, mode
+    weekly = weekly.loc[weekly["area"].eq(selected_area)].copy()
+    comparison = calculate_selected_area_weekly_comparison(
+        long_data, all_daily, week, duration, mode, selected_area
     )
-    wow = calculate_tokyo_chubu_week_over_week(
-        long_data, all_daily, week, duration, mode
+    wow = calculate_selected_area_week_over_week(
+        long_data, all_daily, week, duration, mode, selected_area
     )
 
-    st.subheader("도쿄·중부 주간 핵심지표 비교")
-    if comparison.empty:
-        st.info("선택 조건에서 도쿄·중부 비교 결과를 계산할 수 없습니다.")
-        return
+    st.subheader(f"{area_label} 주간 핵심지표")
     rows = [
         ("주간 평균 전력가격 (엔/kWh)", "average_market_price", "number"),
         ("주간 최저 전력가격 (엔/kWh)", "minimum_market_price", "number"),
@@ -214,21 +225,18 @@ def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_na
         ("전주 대비 평균 스프레드 변화 (엔/kWh)", "week_over_week_change", "change"),
     ]
     core = pd.DataFrame(index=[label for label, _, _ in rows])
-    for area in ("Tokyo", "Chubu"):
-        selected = comparison[comparison["area"].eq(area)]
-        values = []
-        for _, column, kind in rows:
-            value = selected.iloc[0][column] if not selected.empty else np.nan
-            if kind == "date":
-                value = "계산 불가" if pd.isna(value) else f"{pd.Timestamp(value):%Y-%m-%d}"
-            elif kind == "integer":
-                value = "계산 불가" if pd.isna(value) else f"{int(value)}"
-            elif kind == "change":
-                value = format_spread_change(value)
-            else:
-                value = _fmt(value)
-            values.append(value)
-        core[area_names.get(area, area)] = values
+    values = []
+    selected_comparison = comparison.iloc[0] if not comparison.empty else None
+    for _, column, kind in rows:
+        value = selected_comparison[column] if selected_comparison is not None else np.nan
+        if kind == "date":
+            value = "계산 불가" if pd.isna(value) else f"{pd.Timestamp(value):%Y-%m-%d}"
+        elif kind == "change":
+            value = format_spread_change(value)
+        else:
+            value = _fmt(value)
+        values.append(value)
+    core[area_label] = values
     _render_metric_hierarchy_table(core)
 
     incomplete = weekly[
@@ -237,51 +245,74 @@ def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_na
     ]
     if not incomplete.empty:
         st.warning(
-            f"선택 주차에서 불완전하거나 계산하지 못한 도쿄·중부 결과가 "
+            f"선택 주차에서 불완전하거나 계산하지 못한 {area_label} 결과가 "
             f"{len(incomplete):,}건 있습니다. 해당 결과는 주간 KPI에서 제외됩니다."
         )
     if not complete_weeks.get(week, False):
-        observed_days = int(pd.to_datetime(weekly["delivery_date"]).dt.normalize().nunique())
+        observed_days = int(selected_prices["delivery_date"].nunique())
         st.warning(
             f"선택 주차는 일부 데이터만 포함합니다 ({observed_days}/7일). "
             "현재 확보된 완전한 일별 결과만 KPI에 반영합니다."
         )
 
+    st.caption("화면이 확대·이동된 경우 Autoscale을 눌러주세요.")
+    if weekly.empty:
+        st.info("선택 조건에서 ESS 스프레드를 계산할 수 없습니다.")
+    else:
+        st.plotly_chart(
+            create_selected_area_daily_spread_chart(
+                weekly, area_names, selected_area
+            ),
+            width="stretch",
+        )
+    profile = create_selected_area_price_profile(long_data, week, selected_area)
     st.plotly_chart(
-        create_tokyo_chubu_daily_spread_chart(weekly, area_names), width="stretch"
-    )
-    profile = create_tokyo_chubu_price_profile(long_data, week)
-    st.plotly_chart(
-        create_tokyo_chubu_price_profile_chart(profile, area_names), width="stretch"
+        create_selected_area_price_profile_chart(
+            profile, area_names, selected_area
+        ),
+        width="stretch",
     )
     st.caption(
         "이 그래프는 선택 주차의 시간대별 평균 가격 패턴을 보여주는 참고 그래프이며, "
         "일별 최적 ESS 스프레드 계산 자체를 나타내지 않습니다."
     )
-    st.plotly_chart(
-        create_tokyo_chubu_charge_discharge_chart(weekly, area_names), width="stretch"
+    if not weekly.empty:
+        st.plotly_chart(
+            create_selected_area_charge_discharge_chart(
+                weekly, area_names, selected_area
+            ),
+            width="stretch",
+        )
+
+    st.markdown("### 주요 충전·방전 시간대")
+    frequency = calculate_charge_discharge_time_frequency(weekly)
+    charge_time, charge_count = _most_frequent_times(
+        frequency, selected_area, "충전"
+    )
+    discharge_time, discharge_count = _most_frequent_times(
+        frequency, selected_area, "방전"
+    )
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "지역": area_label,
+                    "최빈 충전 시작시간": charge_time,
+                    "충전 선택 횟수": charge_count,
+                    "최빈 방전 시작시간": discharge_time,
+                    "방전 선택 횟수": discharge_count,
+                }
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
     )
 
-    st.markdown("### 주요 충전·방전 시간대 비교")
-    frequency = calculate_charge_discharge_time_frequency(weekly)
-    frequency_rows = []
-    for area in ("Tokyo", "Chubu"):
-        charge_time, charge_count = _most_frequent_times(frequency, area, "충전")
-        discharge_time, discharge_count = _most_frequent_times(frequency, area, "방전")
-        frequency_rows.append(
-            {
-                "지역": area_names.get(area, area),
-                "최빈 충전 시작시간": charge_time,
-                "충전 선택 횟수": charge_count,
-                "최빈 방전 시작시간": discharge_time,
-                "방전 선택 횟수": discharge_count,
-            }
-        )
-    st.dataframe(pd.DataFrame(frequency_rows), width="stretch", hide_index=True)
-
-    st.markdown("### 도쿄·중부 전주 대비")
+    st.markdown(f"### {area_label} 전주 대비")
     if wow.empty:
-        st.info("비교 가능한 직전 주차 데이터가 없습니다. 현재 주 값은 위 표에서 확인할 수 있습니다.")
+        st.info(
+            "비교 가능한 직전 주차 데이터가 없습니다. 현재 주 값은 위 표에서 확인할 수 있습니다."
+        )
     else:
         previous_week = week - pd.Timedelta(days=7)
         if previous_week not in complete_weeks:
@@ -289,13 +320,9 @@ def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_na
         elif not complete_weeks[previous_week]:
             st.info("직전 주차가 불완전합니다. 완전한 일별 결과만 전주 값에 반영합니다.")
         wow_table = wow.copy()
-        wow_table["지역"] = wow_table["area"].map(area_names).fillna(wow_table["area"])
-        wow_table["현재 주"] = wow_table.apply(
-            lambda row: f"{int(row['current'])}" if row["metric"] == "양의 스프레드 일수" and pd.notna(row["current"]) else _fmt(row["current"]), axis=1
-        )
-        wow_table["전주"] = wow_table.apply(
-            lambda row: f"{int(row['previous'])}" if row["metric"] == "양의 스프레드 일수" and pd.notna(row["previous"]) else _fmt(row["previous"]), axis=1
-        )
+        wow_table["지역"] = area_label
+        wow_table["현재 주"] = wow_table["current"].map(_fmt)
+        wow_table["전주"] = wow_table["previous"].map(_fmt)
         wow_table["변화"] = wow_table["change"].map(format_spread_change)
         st.dataframe(
             wow_table[["metric", "지역", "현재 주", "전주", "변화"]].rename(
@@ -305,46 +332,67 @@ def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_na
             hide_index=True,
         )
 
-    st.markdown("### 도쿄·중부 일별 ESS 스프레드 상세 데이터")
-    detail = weekly.copy()
-    detail["지역"] = detail["area"].map(area_names).fillna(detail["area"])
-    detail["날짜"] = pd.to_datetime(detail["delivery_date"]).dt.strftime("%Y-%m-%d")
-    detail["ESS 운용시간"] = detail["duration_hours"].map(lambda value: f"{value}시간")
-    detail["계산방식"] = detail["operation_mode"].map(MODE_DISPLAY).fillna(detail["operation_mode"])
-    detail["양의 스프레드 여부"] = detail["positive_spread"].map({True: "예", False: "아니오"})
-    detail = detail.sort_values(
-        ["delivery_date", "area"],
-        key=lambda values: values.map({"Tokyo": 0, "Chubu": 1}) if values.name == "area" else values,
-    )
-    detail = detail.rename(
-        columns={
-            "charge_start": "충전 시작", "charge_end": "충전 종료",
-            "charge_average_price": "충전 평균가격 (엔/kWh)",
-            "discharge_start": "방전 시작", "discharge_end": "방전 종료",
-            "discharge_average_price": "방전 평균가격 (엔/kWh)",
-            "spread": "스프레드 (엔/kWh)", "completeness_flag": "데이터 완전성",
-            "warning_message": "경고 내용",
-        }
-    )
-    detail_columns = [
-        "날짜", "지역", "ESS 운용시간", "계산방식", "충전 시작", "충전 종료",
-        "충전 평균가격 (엔/kWh)", "방전 시작", "방전 종료",
-        "방전 평균가격 (엔/kWh)", "스프레드 (엔/kWh)", "양의 스프레드 여부",
-        "데이터 완전성", "경고 내용",
-    ]
-    st.dataframe(
-        detail[detail_columns].style.format(
-            {
-                "충전 평균가격 (엔/kWh)": "{:,.2f}",
-                "방전 평균가격 (엔/kWh)": "{:,.2f}",
-                "스프레드 (엔/kWh)": "{:,.2f}",
-            },
-            na_rep="계산 불가",
-        ),
-        width="stretch",
-        hide_index=True,
-    )
-    with st.expander("도쿄·중부 분석 지표 설명"):
+    st.markdown(f"### {area_label} 일별 ESS 스프레드 상세 데이터")
+    if weekly.empty:
+        st.info("표시할 ESS 스프레드 상세 데이터가 없습니다.")
+    else:
+        detail = weekly.copy()
+        detail["지역"] = area_label
+        detail["날짜"] = pd.to_datetime(detail["delivery_date"]).dt.strftime(
+            "%Y-%m-%d"
+        )
+        detail["ESS 운용시간"] = detail["duration_hours"].map(
+            lambda value: f"{value}시간"
+        )
+        detail["계산방식"] = detail["operation_mode"].map(MODE_DISPLAY).fillna(
+            detail["operation_mode"]
+        )
+        detail["양의 스프레드 여부"] = detail["positive_spread"].map(
+            {True: "예", False: "아니오"}
+        )
+        detail = detail.sort_values("delivery_date").rename(
+            columns={
+                "charge_start": "충전 시작",
+                "charge_end": "충전 종료",
+                "charge_average_price": "충전 평균가격 (엔/kWh)",
+                "discharge_start": "방전 시작",
+                "discharge_end": "방전 종료",
+                "discharge_average_price": "방전 평균가격 (엔/kWh)",
+                "spread": "스프레드 (엔/kWh)",
+                "completeness_flag": "데이터 완전성",
+                "warning_message": "경고 내용",
+            }
+        )
+        detail_columns = [
+            "날짜",
+            "지역",
+            "ESS 운용시간",
+            "계산방식",
+            "충전 시작",
+            "충전 종료",
+            "충전 평균가격 (엔/kWh)",
+            "방전 시작",
+            "방전 종료",
+            "방전 평균가격 (엔/kWh)",
+            "스프레드 (엔/kWh)",
+            "양의 스프레드 여부",
+            "데이터 완전성",
+            "경고 내용",
+        ]
+        st.dataframe(
+            detail[detail_columns].style.format(
+                {
+                    "충전 평균가격 (엔/kWh)": "{:,.2f}",
+                    "방전 평균가격 (엔/kWh)": "{:,.2f}",
+                    "스프레드 (엔/kWh)": "{:,.2f}",
+                },
+                na_rep="계산 불가",
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+
+    with st.expander("지역별 분석 지표 설명"):
         st.markdown(
             """
 - 주간 평균·최저·최고 전력가격: 선택 주차의 해당 지역 30분 가격 전체의 평균·최솟값·최댓값
@@ -362,6 +410,10 @@ def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_na
 """
         )
 
+
+def render_jepx_tokyo_chubu_analysis(long_data, spread_results_provider, area_names):
+    """이전 호출명 호환용 지역별 분석 래퍼."""
+    return render_jepx_area_analysis(long_data, spread_results_provider, area_names)
 
 def render_jepx_weekly_monitor(long_data, spread_results_provider, area_names):
     st.subheader("JEPX 주간 통합지표")

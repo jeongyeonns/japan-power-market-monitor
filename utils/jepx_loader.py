@@ -9,6 +9,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.jepx_areas import JEPX_AREA_DISPLAY
+
 SUPPORTED_SUFFIXES = {".csv"}
 ENCODING_CANDIDATES = ("cp932", "shift_jis", "utf-8-sig", "utf-8")
 DELIMITER = ","
@@ -50,18 +52,8 @@ WIDE_COLUMN_MAP = {
     "買いブロック約定総量(kWh)": "buy_block_contracted_volume_kwh",
 }
 REQUIRED_COLUMNS = set(WIDE_COLUMN_MAP)
-AREA_DISPLAY = {
-    "System": "시스템가격",
-    "Hokkaido": "홋카이도",
-    "Tohoku": "도호쿠",
-    "Tokyo": "도쿄",
-    "Chubu": "중부",
-    "Hokuriku": "호쿠리쿠",
-    "Kansai": "간사이",
-    "Chugoku": "주고쿠",
-    "Shikoku": "시코쿠",
-    "Kyushu": "규슈",
-}
+AREA_DISPLAY = JEPX_AREA_DISPLAY
+
 
 
 def find_jepx_files(data_directory: str | Path) -> pd.DataFrame:

@@ -365,3 +365,94 @@ def create_jepx_weekly_summary(kpis: pd.DataFrame, wow: pd.DataFrame | None = No
         down = int(wow["average_spread_change"].lt(0).sum())
         messages.append(f"전주 대비 평균 스프레드: {up}개 지역 상승, {down}개 지역 하락")
     return messages[:4]
+
+def calculate_selected_area_weekly_comparison(
+    normalized_price_data: pd.DataFrame,
+    daily_spread_data: pd.DataFrame,
+    selected_week,
+    duration_hours: int,
+    operation_mode: str,
+    selected_area: str,
+) -> pd.DataFrame:
+    """기존 주간 집계에서 선택한 한 지역의 핵심지표만 반환합니다."""
+    comparison = create_area_price_spread_comparison(
+        normalized_price_data,
+        daily_spread_data,
+        selected_week,
+        duration_hours,
+        operation_mode,
+    )
+    return comparison.loc[comparison["area"].eq(selected_area)].reset_index(drop=True)
+
+
+def create_selected_area_price_profile(
+    normalized_price_data: pd.DataFrame, selected_week, selected_area: str
+) -> pd.DataFrame:
+    """선택 주차와 한 지역의 48개 시간대 가격 통계를 반환합니다."""
+    start = pd.Timestamp(selected_week).normalize()
+    prices = normalized_price_data.copy()
+    prices["delivery_date"] = pd.to_datetime(prices["delivery_date"]).dt.normalize()
+    prices = prices[
+        prices["delivery_date"].between(start, start + pd.Timedelta(days=6))
+        & prices["area"].eq(selected_area)
+    ]
+    return prices.groupby(
+        ["area", "period_no", "period_start"], as_index=False
+    ).agg(
+        mean_price=("price", "mean"),
+        min_price=("price", "min"),
+        max_price=("price", "max"),
+        observation_days=("delivery_date", "nunique"),
+    )
+
+
+def calculate_selected_area_week_over_week(
+    normalized_price_data: pd.DataFrame,
+    daily_spread_data: pd.DataFrame,
+    selected_week,
+    duration_hours: int,
+    operation_mode: str,
+    selected_area: str,
+) -> pd.DataFrame:
+    """선택한 한 지역의 현재 주·전주 핵심 지표와 절대 변화를 반환합니다."""
+    current = calculate_selected_area_weekly_comparison(
+        normalized_price_data,
+        daily_spread_data,
+        selected_week,
+        duration_hours,
+        operation_mode,
+        selected_area,
+    )
+    previous_start = pd.Timestamp(selected_week) - pd.Timedelta(days=7)
+    previous = calculate_selected_area_weekly_comparison(
+        normalized_price_data,
+        daily_spread_data,
+        previous_start,
+        duration_hours,
+        operation_mode,
+        selected_area,
+    )
+    metrics = {
+        "평균 전력가격": "average_market_price",
+        "평균 충전가격": "average_charge_price",
+        "평균 방전가격": "average_discharge_price",
+        "평균 ESS 스프레드": "average_spread",
+    }
+    merged = current.merge(
+        previous, on="area", how="left", suffixes=("_current", "_previous")
+    )
+    rows = []
+    for _, area_row in merged.iterrows():
+        for metric_label, column in metrics.items():
+            current_value = area_row.get(f"{column}_current", np.nan)
+            previous_value = area_row.get(f"{column}_previous", np.nan)
+            rows.append(
+                {
+                    "area": area_row["area"],
+                    "metric": metric_label,
+                    "current": current_value,
+                    "previous": previous_value,
+                    "change": current_value - previous_value,
+                }
+            )
+    return pd.DataFrame(rows)
