@@ -21,9 +21,11 @@ data/eprx/*.xlsx
 data/eprx/*.xls
 data/eprx/raw/*
 !data/eprx/raw/.gitkeep
+!data/eprx/raw/*_1-0*prompt*.csv
 data/eprx/archive/*
 !data/eprx/archive/.gitkeep
 data/eprx/metadata/*.csv
+!data/eprx/metadata/eprx_prompt_auto_download_state.json
 !data/eprx/.gitkeep
 data/jepx/raw/*
 !data/jepx/raw/.gitkeep

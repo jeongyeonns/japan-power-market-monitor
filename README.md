@@ -252,6 +252,38 @@ data/eprx/metadata/update_log.csv
 `download_history.csv`, `update_log.csv`의 오류 내용을 확인합니다. 두 로그에는
 승인 신청자의 이름, 연락처 또는 브라우저 쿠키 같은 개인정보를 기록하지 않습니다.
 
+### 허가된 1차 조정력 속보치 일일 자동 반영
+
+EPRX로부터 LX International 조직 내부 분석 목적의 자동 취득 허가를 받은 범위에서
+1차 조정력 속보치는 다음 고정 URL만 사용합니다.
+
+```text
+https://www.eprx.or.jp/information/files/2026_1-0_prompt.zip
+```
+
+`.github/workflows/update-eprx-prompt-data.yml`은 매일 일본시간 오전 6시(UTC 전날
+21시)에 한 번 실행됩니다. 요청에는 `LX-International`을 포함한 User-Agent를
+설정하며, 결과 페이지 탐색이나 다른 상품 URL 추측은 수행하지 않습니다.
+
+다운로더는 같은 일본 날짜에 이미 요청한 기록이 있으면 HTTP 요청 전에 종료합니다.
+ZIP 전체를 임시 위치에 받은 후 ZIP 형식, 파일 수, 압축 해제 크기와 내부 경로를
+검사하고, 파일명에 `1-0`과 `prompt`가 포함된 CSV만 기존 EPRX 파서로 검증합니다.
+모든 CSV가 정상일 때만 `data/eprx/raw`에 원자적으로 반영되며, 보관 ZIP 자체는
+저장소에 남기지 않습니다.
+
+로컬에서 승인된 자동 다운로드를 실행하려면:
+
+```powershell
+$env:EPRX_AUTOMATION_APPROVED="true"
+python -m utils.eprx_prompt_downloader
+```
+
+마지막 요청일과 ZIP 해시, 반영 파일 및 검증 결과는 다음 파일에 기록됩니다.
+
+```text
+data/eprx/metadata/eprx_prompt_auto_download_state.json
+```
+
 ## 지역과 주파수 권역
 
 - 50Hz: Hokkaido, Tohoku, Tokyo
