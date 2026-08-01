@@ -1,0 +1,105 @@
+{
+  "last_request_date_jst": "2026-08-01",
+  "requested_at_jst": "2026-08-01T09:15:03.556600+09:00",
+  "source_url": "https://www.eprx.or.jp/information/files/2026_1-0_prompt.zip",
+  "status": "완료",
+  "user_agent": "LX-International-Japan-Market-Monitor/1.0 (EPRX-approved; internal-analysis; daily-download)",
+  "files": [
+    {
+      "file_name": "202604_1-0_prompt.csv",
+      "rows": 12960,
+      "date_min": "2026-04-01",
+      "date_max": "2026-04-30",
+      "areas": [
+        "Chubu",
+        "Chugoku",
+        "Hokkaido",
+        "Hokuriku",
+        "Kansai",
+        "Kyushu",
+        "Shikoku",
+        "Tohoku",
+        "Tokyo"
+      ]
+    },
+    {
+      "file_name": "202605_1-0_prompt.csv",
+      "rows": 13392,
+      "date_min": "2026-05-01",
+      "date_max": "2026-05-31",
+      "areas": [
+        "Chubu",
+        "Chugoku",
+        "Hokkaido",
+        "Hokuriku",
+        "Kansai",
+        "Kyushu",
+        "Shikoku",
+        "Tohoku",
+        "Tokyo"
+      ]
+    },
+    {
+      "file_name": "202606_1-0_prompt.csv",
+      "rows": 12960,
+      "date_min": "2026-06-01",
+      "date_max": "2026-06-30",
+      "areas": [
+        "Chubu",
+        "Chugoku",
+        "Hokkaido",
+        "Hokuriku",
+        "Kansai",
+        "Kyushu",
+        "Shikoku",
+        "Tohoku",
+        "Tokyo"
+      ]
+    },
+    {
+      "file_name": "202607_1-0_prompt.csv",
+      "rows": 13392,
+      "date_min": "2026-07-01",
+      "date_max": "2026-07-31",
+      "areas": [
+        "Chubu",
+        "Chugoku",
+        "Hokkaido",
+        "Hokuriku",
+        "Kansai",
+        "Kyushu",
+        "Shikoku",
+        "Tohoku",
+        "Tokyo"
+      ]
+    },
+    {
+      "file_name": "202608_1-0_prompt.csv",
+      "rows": 432,
+      "date_min": "2026-08-01",
+      "date_max": "2026-08-01",
+      "areas": [
+        "Chubu",
+        "Chugoku",
+        "Hokkaido",
+        "Hokuriku",
+        "Kansai",
+        "Kyushu",
+        "Shikoku",
+        "Tohoku",
+        "Tokyo"
+      ]
+    }
+  ],
+  "final_url": "https://www.eprx.or.jp/information/files/2026_1-0_prompt.zip",
+  "archive_sha256": "1288c4616502ffd12330a7b9409f3aeef73a7aa06ad369430495c362c8af24e1",
+  "archive_size": 1266216,
+  "changed_files": [
+    "202604_1-0_prompt.csv",
+    "202605_1-0_prompt.csv",
+    "202606_1-0_prompt.csv",
+    "202607_1-0_prompt.csv",
+    "202608_1-0_prompt.csv"
+  ],
+  "unchanged_files": []
+}
