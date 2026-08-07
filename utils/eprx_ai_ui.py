@@ -90,7 +90,7 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
     target.caption(f"계통자료 출처: {'도쿄전력 PG' if region == 'Tokyo' else '중부전력 PG'} · 최신일: {local['latest_source_date']}")
     target.caption(f"분석 기간: {context.get('analysis_period', {}).get('start')} ~ {context.get('analysis_period', {}).get('end')} · 결합 성공률: {rate:.1%}")
     fallback = build_eprx_statistical_fallback(context)
-    with target.expander("Python 통계 요약", expanded=True): target.json(fallback)
+    with target.expander("Python 통계 요약", expanded=False): target.json(fallback)
     api_key, model = resolve_openai_settings()
     state = evaluate_eprx_ai_ui_state(market="EPRX", region=region, week_start=week_start,
         context_status=local["status"], complete_week=join["matched_rows"] == 336,

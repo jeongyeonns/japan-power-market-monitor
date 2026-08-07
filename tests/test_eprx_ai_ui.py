@@ -1,5 +1,8 @@
+from contextlib import nullcontext
+
 import pandas as pd
 
+from utils import eprx_ai_ui
 from utils.eprx_ai_ui import evaluate_eprx_ai_ui_state, run_ai_analysis_action
 
 
@@ -38,3 +41,58 @@ def test_button_click_cache_rerun_context_change_and_regenerate():
     changed = {**base, "value": 2}
     run_ai_analysis_action(clicked=True, **{**kwargs, "context": changed}); assert calls == [1, 2]
     run_ai_analysis_action(clicked=True, regenerate=True, **kwargs); assert calls == [1, 2, 1]
+
+
+class RenderTarget:
+    def __init__(self):
+        self.buttons = []
+        self.expanders = []
+
+    def button(self, label, **kwargs):
+        self.buttons.append((label, kwargs))
+        return False
+
+    def expander(self, label, **kwargs):
+        self.expanders.append((label, kwargs))
+        return nullcontext()
+
+    def __getattr__(self, _name):
+        return lambda *args, **kwargs: None
+
+
+def _render(monkeypatch, *, api_key="key", local_status="ok", cached=False):
+    context = {"region": "Tokyo", "selected_week": {"week": {"market_regimes": ["modern"]}}}
+    local = {"status": local_status, "message": "missing", "region": "Tokyo"}
+    if local_status == "ok":
+        local.update({"analysis_context": context, "join_diagnostics": {
+            "matched_rows": 336, "eprx_rows": 336, "tepco_rows": 336},
+            "latest_source_date": "2026-08-02", "file_fingerprint": "files"})
+    monkeypatch.setattr(eprx_ai_ui, "load_local_eprx_grid_context", lambda *args: local)
+    monkeypatch.setattr(eprx_ai_ui, "build_eprx_statistical_fallback", lambda _context: {})
+    monkeypatch.setattr(eprx_ai_ui, "resolve_openai_settings", lambda: (api_key, "gpt-5-mini"))
+    session = {}
+    if cached and local_status == "ok":
+        key = eprx_ai_ui.make_analysis_cache_key(
+            "Tokyo", "2026-07-27", "files",
+            eprx_ai_ui.calculate_eprx_context_hash(context), "gpt-5-mini")
+        session[key] = {"status": "ok", "headline": "cached", "summary": "summary"}
+    monkeypatch.setattr("streamlit.session_state", session)
+    target = RenderTarget()
+    eprx_ai_ui.render_eprx_ai_analysis_section(
+        target, pd.DataFrame(), "Tokyo", pd.Timestamp("2026-07-27"))
+    return target
+
+
+def test_generate_button_visible_for_ready_and_cached_states(monkeypatch):
+    for cached in (False, True):
+        target = _render(monkeypatch, cached=cached)
+        generate = next(item for item in target.buttons if item[0] == "AI 분석 생성")
+        assert generate[1]["disabled"] is False
+        assert target.expanders == [("Python 통계 요약", {"expanded": False})]
+
+
+def test_generate_button_visible_but_disabled_without_key_or_data(monkeypatch):
+    no_key = _render(monkeypatch, api_key=None)
+    assert next(item for item in no_key.buttons if item[0] == "AI 분석 생성")[1]["disabled"] is True
+    no_data = _render(monkeypatch, local_status="source_data_missing")
+    assert next(item for item in no_data.buttons if item[0] == "AI 분석 생성")[1]["disabled"] is True
