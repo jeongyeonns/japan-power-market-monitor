@@ -21,6 +21,19 @@ REQUIRED_COLUMNS = {
     "wind_generation_mw",
 }
 FEATURE_COLUMNS = (
+    "renewable_generation_mw",
+    "renewable_share_pct",
+    "residual_demand_proxy_mw",
+    "demand_ramp_30m_mw",
+    "abs_demand_ramp_30m_mw",
+    "renewable_ramp_30m_mw",
+    "abs_renewable_ramp_30m_mw",
+    "residual_demand_ramp_30m_mw",
+    "abs_residual_demand_ramp_30m_mw",
+    "solar_ramp_30m_mw",
+    "abs_solar_ramp_30m_mw",
+    "wind_ramp_30m_mw",
+    "abs_wind_ramp_30m_mw",
     "variable_renewable_generation_mw",
     "residual_demand_mw",
     "variable_renewable_share",
@@ -33,15 +46,23 @@ FEATURE_COLUMNS = (
 
 
 def _safe_share(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
-    return numerator.div(denominator.where(denominator.ne(0)))
+    return numerator.div(denominator.where(denominator.gt(0)))
 
 
 def _continuous_change(
-    values: pd.Series, datetime_jst: pd.Series
+    values: pd.Series, datetime_jst: pd.Series, groups: pd.Series
 ) -> pd.Series:
     """직전 행이 정확히 30분 전일 때만 변화량을 계산한다."""
-    continuous = datetime_jst.diff().eq(pd.Timedelta(minutes=30))
+    same_group = groups.eq(groups.shift())
+    continuous = datetime_jst.diff().eq(pd.Timedelta(minutes=30)) & same_group
     return values.diff().where(continuous)
+
+
+def _region_groups(data: pd.DataFrame) -> pd.Series:
+    for column in ("area_eprx", "area", "area_grid", "area_tepco"):
+        if column in data.columns:
+            return data[column].astype("string").fillna("<missing>")
+    return pd.Series("<single-region>", index=data.index, dtype="string")
 
 
 def build_eprx_driver_features(
@@ -68,30 +89,49 @@ def build_eprx_driver_features(
         errors="coerce",
     )
     result["datetime_jst"] = local_datetime.dt.tz_localize(JST)
-    result = result.sort_values("datetime_jst", kind="stable").reset_index(drop=True)
+    result["_feature_region"] = _region_groups(result)
+    result = result.sort_values(
+        ["_feature_region", "datetime_jst"], kind="stable"
+    ).reset_index(drop=True)
 
-    result["variable_renewable_generation_mw"] = (
+    result["renewable_generation_mw"] = (
         result["solar_generation_mw"] + result["wind_generation_mw"]
     )
-    result["residual_demand_mw"] = (
+    result["residual_demand_proxy_mw"] = (
         result["area_demand_mw"]
-        - result["variable_renewable_generation_mw"]
+        - result["renewable_generation_mw"]
     )
-    result["variable_renewable_share"] = _safe_share(
-        result["variable_renewable_generation_mw"], result["area_demand_mw"]
-    )
+    share = _safe_share(result["renewable_generation_mw"], result["area_demand_mw"])
+    result["renewable_share_pct"] = share * 100
+
+    # Backward-compatible aliases keep their original units and meanings.
+    result["variable_renewable_generation_mw"] = result["renewable_generation_mw"]
+    result["residual_demand_mw"] = result["residual_demand_proxy_mw"]
+    result["variable_renewable_share"] = share
 
     change_sources = {
-        "demand_change_mw_30min": "area_demand_mw",
-        "solar_change_mw_30min": "solar_generation_mw",
-        "wind_change_mw_30min": "wind_generation_mw",
-        "variable_renewable_change_mw_30min": "variable_renewable_generation_mw",
-        "residual_demand_change_mw_30min": "residual_demand_mw",
+        "demand_ramp_30m_mw": "area_demand_mw",
+        "solar_ramp_30m_mw": "solar_generation_mw",
+        "wind_ramp_30m_mw": "wind_generation_mw",
+        "renewable_ramp_30m_mw": "renewable_generation_mw",
+        "residual_demand_ramp_30m_mw": "residual_demand_proxy_mw",
     }
     for target, source in change_sources.items():
         result[target] = _continuous_change(
-            result[source], result["datetime_jst"]
+            result[source], result["datetime_jst"], result["_feature_region"]
         )
+        result[f"abs_{target}"] = result[target].abs()
+
+    aliases = {
+        "demand_change_mw_30min": "demand_ramp_30m_mw",
+        "solar_change_mw_30min": "solar_ramp_30m_mw",
+        "wind_change_mw_30min": "wind_ramp_30m_mw",
+        "variable_renewable_change_mw_30min": "renewable_ramp_30m_mw",
+        "residual_demand_change_mw_30min": "residual_demand_ramp_30m_mw",
+    }
+    for alias, standard in aliases.items():
+        result[alias] = result[standard]
+    result = result.drop(columns="_feature_region")
 
     duplicate_rows = int(result.duplicated(list(JOIN_KEYS), keep=False).sum())
     join_counts = (
@@ -189,7 +229,7 @@ def build_eprx_driver_weekly_context(
         "residual_demand_change_mw_30min": "residual_demand_change_mw_30min",
     }
     return {
-        "context_type": "eprx_tokyo_driver_weekly",
+        "context_type": "eprx_driver_weekly",
         "region": _infer_region(feature_df, region),
         "week_start": start.date().isoformat(),
         "week_end": (end - pd.Timedelta(days=1)).date().isoformat(),

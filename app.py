@@ -22,6 +22,7 @@ from utils.eprx_periods import (
     MODERN_SEGMENT_NOTICE,
 )
 from utils.eprx_downloader import automation_approved, update_eprx_files
+from utils.eprx_ai_ui import render_eprx_ai_analysis_section
 from utils.jepx_loader import (
     AREA_DISPLAY as JEPX_AREA_DISPLAY,
     find_jepx_files,
@@ -1389,6 +1390,8 @@ def render_regional_analysis(
 입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다.
 """
         )
+
+    render_eprx_ai_analysis_section(target, data, selected_area, selected_week)
 
 
 def render_jepx_market_placeholder() -> None:
