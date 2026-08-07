@@ -64,7 +64,11 @@ def _render_result(target, result: dict[str, Any]) -> None:
         values = result.get(field, [])
         if values:
             target.markdown(f"**{title}**")
-            for value in values: target.markdown(f"- {value}")
+            for value in values:
+                if isinstance(value, dict) and "interpretation" in value:
+                    target.markdown(f"- {value['display_name']}: {value['value']:,.4g} {value['unit']} — {value['interpretation']}")
+                else:
+                    target.markdown(f"- {value}")
     if result.get("profile_warning"): target.warning(result["profile_warning"])
     target.write(result.get("conclusion", "")); target.caption(result.get("disclaimer", ""))
 
