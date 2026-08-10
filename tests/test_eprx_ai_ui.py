@@ -68,7 +68,8 @@ class RenderTarget:
         return lambda *args, **kwargs: None
 
 
-def _render(monkeypatch, *, api_key="key", local_status="ok", cached=False):
+def _render(monkeypatch, *, api_key="key", local_status="ok", cached=False,
+            cached_result=None):
     context = {"region": "Tokyo", "selected_week": {"week": {"market_regimes": ["modern"]}}}
     local = {"status": local_status, "message": "missing", "region": "Tokyo"}
     if local_status == "ok":
@@ -83,7 +84,7 @@ def _render(monkeypatch, *, api_key="key", local_status="ok", cached=False):
         key = eprx_ai_ui.make_analysis_cache_key(
             "Tokyo", "2026-07-27", "files",
             eprx_ai_ui.calculate_eprx_context_hash(context), "gpt-5-mini")
-        session[key] = {"status": "ok", "headline": "cached", "summary": "summary"}
+        session[key] = cached_result or {"status": "ok", "headline": "cached", "summary": "summary"}
     monkeypatch.setattr("streamlit.session_state", session)
     target = RenderTarget()
     eprx_ai_ui.render_eprx_ai_analysis_section(
@@ -108,7 +109,7 @@ def test_generate_button_visible_but_disabled_without_key_or_data(monkeypatch):
 
 def test_result_renderer_treats_interpretation_string_as_paragraph_and_formats_evidence():
     target = RenderTarget()
-    eprx_ai_ui._render_result(target, {
+    eprx_ai_ui.render_eprx_ai_result(target, {
         "status": "ok", "headline": "주간 메모", "summary": "요약",
         "confirmed_findings": [
             {"metric_path": "analysis.procurement_change.change", "display_name": "change",
@@ -139,3 +140,29 @@ def test_result_renderer_treats_interpretation_string_as_paragraph_and_formats_e
     assert "demand_mw" not in rendered
     assert "e+" not in rendered.lower()
     assert "This is retrospective" not in rendered
+
+
+def test_live_streamlit_runtime_path_renders_cached_string_and_numbers(monkeypatch):
+    fixture = {
+        "status": "ok", "headline": "주간 분석", "summary": "모집량 중심 요약",
+        "confirmed_findings": [
+            {"metric_path": "analysis.procurement.current", "display_name": "현재 조정력(1차 조정력)",
+             "value": 572.425595, "unit": "MW", "interpretation": "주간 평균입니다."},
+            {"metric_path": "analysis.driver_changes.mean_demand_mw.current", "display_name": "평균 수요",
+             "value": 40022.863095, "unit": "MW", "interpretation": "공개 실적 평균입니다."},
+            {"metric_path": "analysis.driver_changes.mean_renewable_share_pct.current",
+             "display_name": "평균 재생에너지 비율", "value": 9.0114, "unit": "%",
+             "interpretation": "주간 평균 비율입니다."},
+        ],
+        "statistical_interpretation": "피어슨·스피어만 모두 여러 변수에서 같은 방향의 관계를 보였습니다.",
+        "association_candidates": [], "counter_evidence": [], "data_quality_notes": [],
+        "limitations": [], "profile_warning": "", "conclusion": "", "disclaimer": "",
+    }
+    target = _render(monkeypatch, cached=True, cached_result=fixture)
+    rendered = "\n".join(target.markdowns + target.writes)
+    assert "피어슨·스피어만 모두 여러 변수에서 같은 방향의 관계를 보였습니다." in target.writes
+    assert not any(item in target.markdowns for item in ("- 피", "- 어", "- 슨"))
+    assert "572.4 MW" in rendered
+    assert "40,022.9 MW" in rendered
+    assert "9.0%" in rendered
+    assert "4.002e+04" not in rendered

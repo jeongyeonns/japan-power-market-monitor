@@ -126,7 +126,8 @@ def run_ai_analysis_action(*, context: dict[str, Any], region: str, week_start: 
     return result
 
 
-def _render_result(target, result: dict[str, Any]) -> None:
+def render_eprx_ai_result(target, result: dict[str, Any]) -> None:
+    """Render the structured AI response used by the live Streamlit section."""
     if result.get("status") != "ok":
         target.warning(result.get("message", "AI 분석 결과를 사용할 수 없습니다.")); return
     target.markdown(f"#### {result['headline']}")
@@ -181,5 +182,6 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
     else:
         result = run_ai_analysis_action(context=context, region=region, week_start=week_start,
             file_fingerprint=local["file_fingerprint"], model=model, session_state=st.session_state, clicked=False)
-    if result: _render_result(target, result)
+    if result:
+        render_eprx_ai_result(target, result)
     target.caption("본 분석은 공개된 30분 실적자료를 이용한 사후 통계분석입니다. 수요는 공개자료 기반 실적치이며 의사결정 당시 예측자료와 다를 수 있습니다. 평상시분·비상시분·수의계약량·자연체여력은 분리되어 있지 않습니다. 통계적 연관성은 인과관계를 의미하지 않으며 모집량 예측 결과가 아닙니다.")
