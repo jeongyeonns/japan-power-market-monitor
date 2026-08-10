@@ -124,10 +124,10 @@ def add_leave_one_out_anomalies(data: pd.DataFrame) -> pd.DataFrame:
 def _strength(value: float | None) -> str:
     if value is None or not np.isfinite(value): return "unavailable"
     absolute = abs(value)
-    if absolute < 0.10: return "negligible"
-    if absolute < 0.30: return "weak"
-    if absolute < 0.50: return "moderate"
-    if absolute < 0.70: return "strong"
+    if absolute < 0.20: return "negligible"
+    if absolute < 0.40: return "weak"
+    if absolute < 0.60: return "moderate"
+    if absolute < 0.80: return "strong"
     return "very_strong"
 
 
@@ -290,20 +290,20 @@ def analyze_eprx_driver_statistics(
         "raw_correlations": raw, "time_adjusted_correlations": adjusted,
         "bootstrap_intervals": bootstrap, "regression_models": _regression_models(data),
         "data_quality": quality,
-        "interpretation_rules": {"strength_thresholds": [0.10, 0.30, 0.50, 0.70],
+        "interpretation_rules": {"strength_thresholds": [0.20, 0.40, 0.60, 0.80],
             "classification_is_descriptive_only": True},
         "warnings": warnings,
         "limitations": [
-            "This is retrospective statistical association analysis using public 30-minute actuals.",
-            "Actual demand and renewable output may differ from forecasts available when EPRX procurement was decided.",
-            "Residual demand is a proxy calculated from public data.",
-            "Thirty-minute data cannot reproduce sub-second primary reserve variation.",
-            "Normal-time and emergency-time procurement components are not separated.",
-            "Natural headroom, bilateral contracts, and off-market procurement are not included.",
-            "Pearson, Spearman, and regression coefficients do not imply causality.",
-            "Date-block bootstrap does not fully remove time-series dependence.",
-            "Repeated procurement profiles can distort raw correlations.",
-            "This analysis is not a procurement forecasting model.",
+            "본 분석은 공개된 30분 실적을 이용한 사후 연관성 분석입니다.",
+            "실제 수요·재생에너지 실적은 모집량 결정 시점의 예측치와 다를 수 있습니다.",
+            "잔여수요는 공개자료를 이용한 추정치입니다.",
+            "30분 자료로는 1차 조정력이 대응하는 초단주기 변동을 직접 재현할 수 없습니다.",
+            "평상시분과 비상시분 모집량은 분리되어 있지 않습니다.",
+            "자연체여력·수의계약·시장 외 조달은 포함되지 않습니다.",
+            "상관계수와 회귀계수는 인과관계를 의미하지 않습니다.",
+            "일자 단위 bootstrap은 시계열 의존성을 완전히 제거하지 못합니다.",
+            "반복되는 모집량 프로파일은 원시 상관을 왜곡할 수 있습니다.",
+            "본 분석은 모집량 예측 모델이 아닙니다.",
         ],
         "calculation_metadata": {"minimum_correlation_samples": MIN_CORRELATION_SAMPLES,
             "minimum_regression_samples": MIN_REGRESSION_SAMPLES, "minimum_bootstrap_complete_days": MIN_BOOTSTRAP_DAYS,
@@ -391,6 +391,10 @@ def analyze_eprx_selected_week_statistics(
     selected = prepared.loc[prepared["datetime_jst"].ge(start.normalize()) & prepared["datetime_jst"].lt(end)]
     base = build_eprx_analysis_context(feature_df, region, week_start)
     return to_json_safe({"week": base["week"],
+        "procurement": base["procurement"],
+        "daily_profile": base["daily_profile"],
+        "notable_time_blocks": base["notable_time_blocks"],
+        "historical_position": base["historical_position"],
         "procurement_change": base["previous_week_comparison"].get("procurement_mean_mw"),
         "driver_changes": {key: value for key, value in base["previous_week_comparison"].items() if not key.startswith("procurement_")},
         "association_candidates": _association_candidates(base, statistics),

@@ -127,7 +127,20 @@ def test_common_statistical_context_is_json_safe(region):
     assert "raw_correlations" in context
     assert "time_adjusted_correlations" in context
     assert "association_candidates" in context["selected_week"]
+    assert "procurement" in context["selected_week"]
+    assert "daily_profile" in context["selected_week"]
+    assert "notable_time_blocks" in context["selected_week"]
+    assert "historical_position" in context["selected_week"]
+    assert not any(item.startswith("This is ") for item in context["limitations"])
     json.dumps(context, allow_nan=False)
+
+
+def test_correlation_strength_uses_non_exaggerating_thresholds():
+    relation = _correlation(pd.Series(range(120)), pd.Series(range(120)) * 0.51)
+    assert relation["pearson_strength"] == "very_strong"
+    from utils.eprx_driver_statistics import _strength
+    assert _strength(0.51) == "moderate"
+    assert _strength(0.61) == "strong"
 
 
 def test_no_material_procurement_change_suppresses_candidates():

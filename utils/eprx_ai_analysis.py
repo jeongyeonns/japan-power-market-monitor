@@ -98,6 +98,10 @@ def build_eprx_ai_payload(analysis_context: dict[str, Any]) -> dict[str, Any]:
     payload = _json_safe({
         "region": analysis_context["region"], "week": selected["week"],
         "analysis_period": analysis_context.get("analysis_period"),
+        "procurement": selected.get("procurement"),
+        "daily_profile": selected.get("daily_profile"),
+        "notable_time_blocks": selected.get("notable_time_blocks"),
+        "historical_position": selected.get("historical_position"),
         "procurement_change": selected.get("procurement_change"),
         "driver_changes": selected.get("driver_changes"),
         "raw_correlations": compact_correlations(analysis_context.get("raw_correlations")),
@@ -109,6 +113,8 @@ def build_eprx_ai_payload(analysis_context: dict[str, Any]) -> dict[str, Any]:
         "data_quality": quality, "warnings": list(dict.fromkeys(analysis_context.get("warnings", []))),
         "limitations": list(dict.fromkeys(analysis_context.get("limitations", []))),
     })
+    if selected.get("co_movement_comparison"):
+        payload["co_movement_comparison"] = _json_safe(selected["co_movement_comparison"])
     payload, excluded = _trim_payload(payload)
     text = json.dumps(payload, ensure_ascii=False, allow_nan=False)
     if len(text) > MAX_INPUT_CHARACTERS: raise ValueError("AI payload exceeds the configured character limit")
@@ -388,8 +394,15 @@ def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | N
         client = _client_factory(api_key=key, max_retries=0)
     except (ImportError, ModuleNotFoundError) as exc:
         return {"status": "dependency_missing", "message": str(exc), "fallback": fallback}
-    instructions = ("한국어로 간결하게 작성하라. 제공된 계산값만 사용하고 상관관계를 인과로 표현하지 말라. "
-        "미래 모집량, 비공개 구성비, 자연체여력 또는 수의계약량을 추정하지 말라. 수요는 공개 30분 실적이고 의사결정 당시 예측자료와 다를 수 있음을 명시하라.")
+    instructions = ("일본 전력시장과 EPRX 1차 조정력 주간 데이터를 검토하는 전력시장 분석가로서 한국어로 작성하라. "
+        "전력시장 실무자가 30초 안에 읽을 수 있게 이번 주 모집량 자체의 평균·범위·전주 대비 변화·시간대 패턴을 먼저 설명하고, "
+        "그다음 역사적 위치와 수요·재생에너지·잔여수요의 관계를 설명하라. raw correlation보다 시간대 조정 상관, "
+        "Pearson·Spearman 방향 일치, bootstrap 구간, association relevance, leave-one-out 및 상·하위 모집량 비교를 우선하라. "
+        "비슷한 파생변수나 같은 태양광 변수군을 중복 나열하지 말고 시장 해석에 유용한 관계만 최대 3개 고르라. "
+        "제공된 계산값만 사용하고 상관관계를 영향이나 인과로 표현하지 말라. 실제 유의성 검정 결과가 없으므로 '유의', "
+        "'유의한 영향', '통계적으로 유의'라는 표현을 사용하지 말라. 미래 모집량, 비공개 구성비, 자연체여력 또는 "
+        "수의계약량을 추정하지 말라. 내부 영문 변수명은 쓰지 말고 자연스러운 한국어 지표명을 사용하라. "
+        "수요는 공개 30분 실적이고 의사결정 당시 예측자료와 다를 수 있음을 명시하라.")
     request_payload = {"expected_response_metadata": {"context_hash": context_hash, "model": selected_model},
                        "domain_constants": {"product": "1차 조정력", "interval_minutes": 30,
                                             "periods_per_day": 48, "days_per_week": 7,
@@ -400,11 +413,13 @@ def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | N
         "confirmed_findings와 association_candidates에 기록하라. 새로운 계산값을 만들지 말고, "
         "각 evidence는 metric_path, display_name, value, unit, interpretation 5개 필드를 모두 포함하고 value는 숫자여야 한다. "
         "정량 근거가 없는 설명은 evidence 배열이 아니라 자유서술 필드에 기록하라. statistical_interpretation은 하나의 문자열이다. "
-        "headline은 1문장, summary는 최대 2문장, confirmed_findings는 최대 3개, 각 evidence interpretation은 1문장으로 작성하라. "
-        "statistical_interpretation은 최대 2문장, association_candidates는 최대 3개, counter_evidence는 최대 3개이며 각 항목은 1문장으로 작성하라. "
-        "profile_warning은 최대 2문장, data_quality_notes는 최대 3개, limitations는 최대 5개, conclusion은 최대 2문장, disclaimer는 1문장으로 작성하라. "
+        "headline은 1문장, summary는 최대 2문장이며 모집량 특징부터 시작하라. confirmed_findings는 최대 3개이며 모집량 패턴만 담고, "
+        "statistical_interpretation은 이번 주 핵심 해석을 최대 2문장, association_candidates는 서로 다른 변수군의 계통 연관성만 최대 3개, "
+        "counter_evidence는 통계적 주의점만 최대 3개로 작성하라. 정상 데이터의 data_quality_notes는 '336/336, 결합률 100%' 수준의 1개 문장으로 제한하라. "
+        "profile_warning은 최대 2문장, limitations는 현재 분석에 중요한 한국어 문장 최대 3개, conclusion은 최대 2문장, disclaimer는 1문장으로 작성하라. "
         "동일 내용을 여러 필드에서 반복하지 말고 숫자 근거는 evidence에서 한 번만 제시하며 summary에서 모두 재나열하지 말라. "
-        "자유서술에서는 불필요하게 숫자를 반복하지 말라. 표시 반올림은 근거 value와 의미가 같게 제한하라.")
+        "상관계수는 단위가 없으며 coefficient나 %를 단위처럼 설명하지 말라. 자유서술에서는 불필요하게 숫자를 반복하지 말라. "
+        "|r| 0.4 이상 0.6 미만은 중간 수준, 0.6 이상 0.8 미만은 강한 관계로 표현하라. 표시 반올림은 근거 value와 의미가 같게 제한하라.")
     request_text = json.dumps(request_payload, ensure_ascii=False)
     request_diagnostics = {"model": selected_model, "max_output_tokens": EPRX_AI_MAX_OUTPUT_TOKENS,
         "reasoning_effort": EPRX_AI_REASONING_EFFORT, "verbosity": EPRX_AI_VERBOSITY,

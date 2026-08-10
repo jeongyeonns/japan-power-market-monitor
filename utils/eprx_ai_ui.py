@@ -15,6 +15,80 @@ from utils.eprx_ai_analysis import (
 from utils.eprx_ai_pipeline import load_local_eprx_grid_context
 
 
+DISPLAY_NAMES = {
+    "procurement_volume_mw": "1차 조정력 모집량",
+    "demand_mw": "전력수요",
+    "solar_mw": "태양광 발전량",
+    "solar_generation_mw": "태양광 발전량",
+    "wind_mw": "풍력 발전량",
+    "wind_generation_mw": "풍력 발전량",
+    "renewable_generation_mw": "재생에너지 발전량",
+    "renewable_share_pct": "재생에너지 발전 비중",
+    "residual_demand_proxy_mw": "잔여수요 추정치",
+    "abs_demand_ramp_30m_mw": "전력수요 30분 변동폭",
+    "abs_residual_demand_ramp_30m_mw": "잔여수요 30분 변동폭",
+    "abs_renewable_ramp_30m_mw": "재생에너지 30분 변동폭",
+    "abs_solar_ramp_30m_mw": "태양광 30분 변동폭",
+}
+
+LIMITATION_TRANSLATIONS = {
+    "This is retrospective statistical association analysis using public 30-minute actuals.":
+        "본 분석은 공개된 30분 실적을 이용한 사후 연관성 분석입니다.",
+    "Actual demand and renewable output may differ from forecasts available when EPRX procurement was decided.":
+        "실제 수요·재생에너지 실적은 모집량 결정 시점의 예측치와 다를 수 있습니다.",
+    "Residual demand is a proxy calculated from public data.":
+        "잔여수요는 공개자료를 이용한 추정치입니다.",
+    "Thirty-minute data cannot reproduce sub-second primary reserve variation.":
+        "30분 자료로는 1차 조정력이 대응하는 초단주기 변동을 직접 재현할 수 없습니다.",
+}
+
+
+def _evidence_display_name(evidence: dict[str, Any]) -> str:
+    path = str(evidence.get("metric_path", ""))
+    for metric, display in sorted(DISPLAY_NAMES.items(), key=lambda item: -len(item[0])):
+        if metric in path:
+            return display
+    return str(evidence.get("display_name") or "분석 지표")
+
+
+def _format_evidence(evidence: dict[str, Any]) -> str:
+    name = _evidence_display_name(evidence)
+    value = float(evidence["value"])
+    path = str(evidence.get("metric_path", "")).lower()
+    unit = str(evidence.get("unit", "")).strip()
+    if "r_squared" in path:
+        metric = f"R² = {value:.2f}"
+    elif "spearman" in path:
+        metric = f"Spearman ρ = {value:+.2f}"
+    elif any(token in path for token in ("pearson", "correlation", "coefficient")) or unit in {
+        "coefficient", "상관계수", "unitless"
+    }:
+        metric = f"Pearson r = {value:+.2f}"
+    elif "percentile" in path:
+        metric = f"백분위 {value:.1f}"
+    elif unit == "MW" or path.endswith("_mw"):
+        metric = f"{value:,.1f} MW"
+    elif unit in {"%", "percentage"}:
+        metric = f"{value:.1f}%"
+    elif unit in {"count", "개", "행", "회"}:
+        metric = f"{value:,.0f}건"
+    else:
+        metric = f"{value:,.2f}"
+    interpretation = str(evidence.get("interpretation", "")).strip()
+    return f"- {name} — {metric}" + (f"\n  {interpretation}" if interpretation else "")
+
+
+def _render_values(target, values: Any) -> None:
+    if isinstance(values, str):
+        target.write(values)
+        return
+    for value in values or []:
+        if isinstance(value, dict) and "value" in value:
+            target.markdown(_format_evidence(value))
+        else:
+            target.markdown(f"- {LIMITATION_TRANSLATIONS.get(str(value), value)}")
+
+
 def evaluate_eprx_ai_ui_state(*, market: str, region: str, week_start: Any,
                               context_status: str, complete_week: bool,
                               market_regimes: list[str] | set[str], join_success_rate: float,
@@ -57,18 +131,15 @@ def _render_result(target, result: dict[str, Any]) -> None:
         target.warning(result.get("message", "AI 분석 결과를 사용할 수 없습니다.")); return
     target.markdown(f"#### {result['headline']}")
     target.write(result["summary"])
-    sections = (("확인된 결과", "confirmed_findings"), ("통계 해석", "statistical_interpretation"),
-                ("관계 후보", "association_candidates"), ("반대·제한 근거", "counter_evidence"),
-                ("데이터 품질", "data_quality_notes"), ("분석 한계", "limitations"))
+    sections = (("모집량 패턴", "confirmed_findings"), ("이번 주 핵심", "statistical_interpretation"),
+                ("계통 변수와의 연관성", "association_candidates"),
+                ("통계적으로 주의할 점", "counter_evidence"),
+                ("데이터 상태", "data_quality_notes"), ("분석 한계", "limitations"))
     for title, field in sections:
         values = result.get(field, [])
         if values:
             target.markdown(f"**{title}**")
-            for value in values:
-                if isinstance(value, dict) and "interpretation" in value:
-                    target.markdown(f"- {value['display_name']}: {value['value']:,.4g} {value['unit']} — {value['interpretation']}")
-                else:
-                    target.markdown(f"- {value}")
+            _render_values(target, values)
     if result.get("profile_warning"): target.warning(result["profile_warning"])
     target.write(result.get("conclusion", "")); target.caption(result.get("disclaimer", ""))
 

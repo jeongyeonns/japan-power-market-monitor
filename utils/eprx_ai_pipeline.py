@@ -58,9 +58,17 @@ def load_local_eprx_grid_context(
                 "source_files": sorted(accepted), "file_diagnostics": safe_diagnostics,
                 "excluded_file_count": len(excluded)}
     try:
-        merged, join_diagnostics = join_eprx_region_with_grid(eprx_df, grid_df, region, week_start)
-        features, feature_diagnostics = build_eprx_driver_features(merged)
-        complete = (len(merged) == 336 and join_diagnostics.get("all_rows_matched") is True)
+        selected_merged, join_diagnostics = join_eprx_region_with_grid(
+            eprx_df, grid_df, region, week_start
+        )
+        complete = (
+            len(selected_merged) == 336
+            and join_diagnostics.get("all_rows_matched") is True
+        )
+        # Completeness is a selected-week gate, but weekday/time-block anomalies and
+        # regressions require the full locally available history as their baseline.
+        historical_merged, _ = join_eprx_region_with_grid(eprx_df, grid_df, region)
+        features, feature_diagnostics = build_eprx_driver_features(historical_merged)
         if not complete:
             return {"status": "join_incomplete", "message": "선택 주차의 EPRX·계통실적 결합률이 100%가 아닙니다.",
                     "region": region, "file_fingerprint": fingerprint["fingerprint"],

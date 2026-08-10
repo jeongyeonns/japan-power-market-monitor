@@ -47,6 +47,8 @@ class RenderTarget:
     def __init__(self):
         self.buttons = []
         self.expanders = []
+        self.markdowns = []
+        self.writes = []
 
     def button(self, label, **kwargs):
         self.buttons.append((label, kwargs))
@@ -55,6 +57,12 @@ class RenderTarget:
     def expander(self, label, **kwargs):
         self.expanders.append((label, kwargs))
         return nullcontext()
+
+    def markdown(self, value, **kwargs):
+        self.markdowns.append(value)
+
+    def write(self, value, **kwargs):
+        self.writes.append(value)
 
     def __getattr__(self, _name):
         return lambda *args, **kwargs: None
@@ -96,3 +104,38 @@ def test_generate_button_visible_but_disabled_without_key_or_data(monkeypatch):
     assert next(item for item in no_key.buttons if item[0] == "AI 분석 생성")[1]["disabled"] is True
     no_data = _render(monkeypatch, local_status="source_data_missing")
     assert next(item for item in no_data.buttons if item[0] == "AI 분석 생성")[1]["disabled"] is True
+
+
+def test_result_renderer_treats_interpretation_string_as_paragraph_and_formats_evidence():
+    target = RenderTarget()
+    eprx_ai_ui._render_result(target, {
+        "status": "ok", "headline": "주간 메모", "summary": "요약",
+        "confirmed_findings": [
+            {"metric_path": "analysis.procurement_change.change", "display_name": "change",
+             "value": 36953.02976190476, "unit": "MW", "interpretation": "전주보다 증가했습니다."},
+            {"metric_path": "analysis.historical.percentile", "display_name": "percentile",
+             "value": 54.645, "unit": "%", "interpretation": "역사적 중간권입니다."},
+            {"metric_path": "analysis.renewable_share_pct", "display_name": "renewable_share_pct",
+             "value": 54.645, "unit": "%", "interpretation": "주간 평균입니다."},
+        ],
+        "statistical_interpretation": "피어슨·스피어만 모두 같은 방향입니다.",
+        "association_candidates": [
+            {"metric_path": "analysis.time_adjusted_correlations.demand_mw.pearson",
+             "display_name": "demand_mw", "value": 0.5686, "unit": "coefficient",
+             "interpretation": "중간 수준의 양의 관계입니다."},
+        ],
+        "counter_evidence": [], "data_quality_notes": [],
+        "limitations": ["This is retrospective statistical association analysis using public 30-minute actuals."],
+        "profile_warning": "", "conclusion": "결론", "disclaimer": "주의",
+    })
+    assert "피어슨·스피어만 모두 같은 방향입니다." in target.writes
+    assert not any(text == "- 피" for text in target.markdowns)
+    rendered = "\n".join(target.markdowns)
+    assert "36,953.0 MW" in rendered
+    assert "백분위 54.6" in rendered
+    assert "재생에너지 발전 비중 — 54.6%" in rendered
+    assert "전력수요 — Pearson r = +0.57" in rendered
+    assert "0.5686 coefficient" not in rendered
+    assert "demand_mw" not in rendered
+    assert "e+" not in rendered.lower()
+    assert "This is retrospective" not in rendered
