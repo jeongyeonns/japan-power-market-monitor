@@ -149,13 +149,17 @@ def test_live_streamlit_runtime_path_renders_cached_string_and_numbers(monkeypat
             {"metric_path": "analysis.procurement.current", "display_name": "현재 조정력(1차 조정력)",
              "value": 572.425595, "unit": "MW", "interpretation": "주간 평균입니다."},
             {"metric_path": "analysis.driver_changes.mean_demand_mw.current", "display_name": "평균 수요",
-             "value": 40022.863095, "unit": "MW", "interpretation": "공개 실적 평균입니다."},
+             "value": 40020.0, "unit": "MW", "interpretation": "공개 실적 평균입니다."},
             {"metric_path": "analysis.driver_changes.mean_renewable_share_pct.current",
              "display_name": "평균 재생에너지 비율", "value": 9.0114, "unit": "%",
              "interpretation": "주간 평균 비율입니다."},
         ],
         "statistical_interpretation": "피어슨·스피어만 모두 여러 변수에서 같은 방향의 관계를 보였습니다.",
-        "association_candidates": [], "counter_evidence": [], "data_quality_notes": [],
+        "association_candidates": [
+            {"metric_path": "analysis.time_adjusted_correlations.demand_mw.pearson",
+             "display_name": "평균 수요", "value": 0.5686, "unit": "coefficient",
+             "interpretation": "중간 수준의 양의 관계입니다."},
+        ], "counter_evidence": [], "data_quality_notes": [],
         "limitations": [], "profile_warning": "", "conclusion": "", "disclaimer": "",
     }
     target = _render(monkeypatch, cached=True, cached_result=fixture)
@@ -163,6 +167,20 @@ def test_live_streamlit_runtime_path_renders_cached_string_and_numbers(monkeypat
     assert "피어슨·스피어만 모두 여러 변수에서 같은 방향의 관계를 보였습니다." in target.writes
     assert not any(item in target.markdowns for item in ("- 피", "- 어", "- 슨"))
     assert "572.4 MW" in rendered
-    assert "40,022.9 MW" in rendered
+    assert "40,020.0 MW" in rendered
     assert "9.0%" in rendered
+    assert "+0.57" in rendered
     assert "4.002e+04" not in rendered
+    assert "9.011 %" not in rendered
+    assert "coefficient" not in rendered
+
+
+def test_metric_formatters_are_nan_safe_and_never_use_scientific_notation():
+    assert eprx_ai_ui.format_mw(40020.123) == "40,020.1 MW"
+    assert eprx_ai_ui.format_percent(9.011) == "9.0%"
+    assert eprx_ai_ui.format_correlation(0.5686) == "+0.57"
+    assert eprx_ai_ui.format_number(336, 0) == "336"
+    for formatter in (eprx_ai_ui.format_mw, eprx_ai_ui.format_percent,
+                      eprx_ai_ui.format_correlation, eprx_ai_ui.format_number):
+        assert formatter(None) == "—"
+        assert formatter(float("nan")) == "—"

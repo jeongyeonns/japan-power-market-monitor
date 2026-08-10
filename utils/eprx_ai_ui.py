@@ -43,6 +43,34 @@ LIMITATION_TRANSLATIONS = {
 }
 
 
+def _finite_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if pd.notna(number) and number not in (float("inf"), float("-inf")) else None
+
+
+def format_mw(value: Any) -> str:
+    number = _finite_number(value)
+    return "—" if number is None else f"{number:,.1f} MW"
+
+
+def format_percent(value: Any) -> str:
+    number = _finite_number(value)
+    return "—" if number is None else f"{number:.1f}%"
+
+
+def format_correlation(value: Any) -> str:
+    number = _finite_number(value)
+    return "—" if number is None else f"{number:+.2f}"
+
+
+def format_number(value: Any, decimals: int = 2) -> str:
+    number = _finite_number(value)
+    return "—" if number is None else f"{number:,.{decimals}f}"
+
+
 def _evidence_display_name(evidence: dict[str, Any]) -> str:
     path = str(evidence.get("metric_path", ""))
     for metric, display in sorted(DISPLAY_NAMES.items(), key=lambda item: -len(item[0])):
@@ -53,27 +81,27 @@ def _evidence_display_name(evidence: dict[str, Any]) -> str:
 
 def _format_evidence(evidence: dict[str, Any]) -> str:
     name = _evidence_display_name(evidence)
-    value = float(evidence["value"])
+    value = evidence.get("value")
     path = str(evidence.get("metric_path", "")).lower()
     unit = str(evidence.get("unit", "")).strip()
     if "r_squared" in path:
-        metric = f"R² = {value:.2f}"
+        metric = f"R² = {format_number(value)}"
     elif "spearman" in path:
-        metric = f"Spearman ρ = {value:+.2f}"
+        metric = f"Spearman ρ = {format_correlation(value)}"
     elif any(token in path for token in ("pearson", "correlation", "coefficient")) or unit in {
         "coefficient", "상관계수", "unitless"
     }:
-        metric = f"Pearson r = {value:+.2f}"
+        metric = f"Pearson r = {format_correlation(value)}"
     elif "percentile" in path:
-        metric = f"백분위 {value:.1f}"
+        metric = f"백분위 {format_number(value, 1)}"
     elif unit == "MW" or path.endswith("_mw"):
-        metric = f"{value:,.1f} MW"
+        metric = format_mw(value)
     elif unit in {"%", "percentage"}:
-        metric = f"{value:.1f}%"
+        metric = format_percent(value)
     elif unit in {"count", "개", "행", "회"}:
-        metric = f"{value:,.0f}건"
+        metric = f"{format_number(value, 0)}건"
     else:
-        metric = f"{value:,.2f}"
+        metric = format_number(value)
     interpretation = str(evidence.get("interpretation", "")).strip()
     return f"- {name} — {metric}" + (f"\n  {interpretation}" if interpretation else "")
 
