@@ -55,6 +55,61 @@ def _add_autoscale_hint(figure: go.Figure) -> None:
     )
 
 
+def _week_trace_name(week_label: str, area: str, area_count: int) -> str:
+    """단일 지역은 주차만, 복수 지역은 지역과 주차를 함께 범례에 표시합니다."""
+    return (
+        week_label
+        if area_count == 1
+        else f"{AREA_NAMES.get(area, area)} · {week_label}"
+    )
+
+
+def _rename_current_week_traces(
+    figure: go.Figure, areas: list[str], hovertemplate: str
+) -> None:
+    """기존 선 스타일을 유지하면서 현재 주 범례와 툴팁만 명확히 합니다."""
+    for trace, area in zip(figure.data, areas):
+        trace.name = _week_trace_name("현재 주", area, len(areas))
+        trace.legendgroup = area
+        trace.hovertemplate = hovertemplate
+
+
+def _add_previous_week_traces(
+    figure: go.Figure,
+    previous_profile: pd.DataFrame | None,
+    areas: list[str],
+    value_column: str,
+    hovertemplate: str,
+    custom_columns: list[str] | None = None,
+) -> None:
+    """동일 시간대 축에 직전 주를 옅은 점선으로 추가합니다."""
+    if previous_profile is None or previous_profile.empty:
+        return
+    previous = _display_data(previous_profile, areas)
+    for area in areas:
+        area_data = previous.loc[previous["area"].eq(area)]
+        if area_data.empty:
+            continue
+        display = AREA_NAMES.get(area, area)
+        customdata = (
+            area_data[custom_columns].to_numpy() if custom_columns else None
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=area_data["period_start"],
+                y=area_data[value_column],
+                mode="lines",
+                name=_week_trace_name("직전 주", area, len(areas)),
+                legendgroup=area,
+                line={"color": AREA_COLORS[display], "width": 1.5, "dash": "dash"},
+                opacity=0.35,
+                customdata=customdata,
+                hovertemplate=hovertemplate,
+                connectgaps=False,
+            )
+        )
+
+
 def area_price_chart(
     profile: pd.DataFrame, areas: list[str], price_unit: str
 ) -> go.Figure:
@@ -85,7 +140,10 @@ def area_price_chart(
 
 
 def area_max_price_chart(
-    profile: pd.DataFrame, areas: list[str], price_unit: str
+    profile: pd.DataFrame,
+    areas: list[str],
+    price_unit: str,
+    previous_profile: pd.DataFrame | None = None,
 ) -> go.Figure:
     data = _display_data(profile, areas)
     area_label = "·".join(AREA_NAMES.get(area, area) for area in areas)
@@ -103,20 +161,31 @@ def area_max_price_chart(
             "지역": "지역",
         },
     )
-    figure.update_traces(
-        hovertemplate=(
-            "지역=%{fullData.name}<br>시간대=%{x}<br>"
-            f"평균 최고 낙찰가격(전원 소재지별)=%{{y:,.2f}} {price_unit}"
-            "<extra></extra>"
-        )
+    hovertemplate = (
+        "주차=%{fullData.name}<br>시간대=%{x}<br>"
+        f"평균 최고 낙찰가격(전원 소재지별)=%{{y:,.2f}} {price_unit}"
+        "<extra></extra>"
     )
-    figure.update_yaxes(range=[0, max_price_axis_upper(data)], rangemode="tozero")
+    _rename_current_week_traces(figure, areas, hovertemplate)
+    _add_previous_week_traces(
+        figure, previous_profile, areas, "max_price", hovertemplate
+    )
+    axis_data = (
+        pd.concat(
+            [data, _display_data(previous_profile, areas)], ignore_index=True
+        )
+        if previous_profile is not None and not previous_profile.empty
+        else data
+    )
+    figure.update_yaxes(range=[0, max_price_axis_upper(axis_data)], rangemode="tozero")
     _add_autoscale_hint(figure)
     return _finish(figure, f"평균 최고 낙찰가격 (전원 소재지별, {price_unit})")
 
 
 def area_award_rate_chart(
-    profile: pd.DataFrame, areas: list[str]
+    profile: pd.DataFrame,
+    areas: list[str],
+    previous_profile: pd.DataFrame | None = None,
 ) -> go.Figure:
     data = _display_data(profile, areas)
     area_label = "·".join(AREA_NAMES.get(area, area) for area in areas)
@@ -135,13 +204,20 @@ def area_award_rate_chart(
             "지역": "지역",
         },
     )
-    figure.update_traces(
-        hovertemplate=(
-            "지역=%{fullData.name}<br>시간대=%{x}<br>"
-            "입찰량(전원 소재지별)=%{customdata[0]:,.2f} MW<br>"
-            "낙찰량(전원 소재지별)=%{customdata[1]:,.2f} MW<br>"
-            "입찰 대비 낙찰률=%{y:.2%}<extra></extra>"
-        )
+    hovertemplate = (
+        "주차=%{fullData.name}<br>시간대=%{x}<br>"
+        "입찰량(전원 소재지별)=%{customdata[0]:,.2f} MW<br>"
+        "낙찰량(전원 소재지별)=%{customdata[1]:,.2f} MW<br>"
+        "입찰 대비 낙찰률=%{y:.2%}<extra></extra>"
+    )
+    _rename_current_week_traces(figure, areas, hovertemplate)
+    _add_previous_week_traces(
+        figure,
+        previous_profile,
+        areas,
+        "award_rate",
+        hovertemplate,
+        custom_columns=["bid_volume", "awarded_volume"],
     )
     figure.update_yaxes(range=[0, 1], tickformat=".0%", rangemode="tozero")
     _add_autoscale_hint(figure)

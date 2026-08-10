@@ -1068,6 +1068,7 @@ def _format_eprx_segment_title(
 def _render_eprx_time_charts(
     target,
     segment_profile: pd.DataFrame,
+    previous_profile: pd.DataFrame,
     visible_areas: list[str],
     price_unit: str,
     heading: str | None = None,
@@ -1080,13 +1081,20 @@ def _render_eprx_time_charts(
         target.caption(notice)
     target.caption("전원 소재지별 최고 낙찰가격의 동일 시간대 평균")
     target.plotly_chart(
-        area_max_price_chart(segment_profile, visible_areas, price_unit),
+        area_max_price_chart(
+            segment_profile, visible_areas, price_unit, previous_profile
+        ),
         width="stretch",
     )
     target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
     target.plotly_chart(
-        area_award_rate_chart(segment_profile, visible_areas), width="stretch"
+        area_award_rate_chart(
+            segment_profile, visible_areas, previous_profile
+        ),
+        width="stretch",
     )
+    if previous_profile.empty:
+        target.caption("직전 주 비교 데이터가 없습니다.")
 
 
 def _prepare_eprx_detail_table(
@@ -1180,6 +1188,10 @@ def render_regional_analysis(
         target.info("선택한 지역과 주차에 해당하는 EPRX 데이터가 없습니다.")
         return
     selected_start = pd.Timestamp(selected_week).normalize()
+    previous_week_start = selected_start - pd.Timedelta(days=7)
+    previous_profile = create_selected_area_weekly_profile(
+        data, previous_week_start, visible_areas
+    )
     raw_week = data.loc[data["week_start"].eq(selected_start)].copy()
     warnings = validate_area_profile(
         profile,
@@ -1283,9 +1295,14 @@ def render_regional_analysis(
                 continue
             heading = _format_eprx_segment_title(segment_raw, regime_label)
             detail_segments.append((heading, segment_profile))
+            segment_regimes = set(segment_profile["market_regime"].dropna())
+            previous_segment_profile = previous_profile.loc[
+                previous_profile["market_regime"].isin(segment_regimes)
+            ].copy()
             _render_eprx_time_charts(
                 target,
                 segment_profile,
+                previous_segment_profile,
                 visible_areas,
                 price_unit,
                 heading=heading,
@@ -1296,6 +1313,9 @@ def render_regional_analysis(
         _render_eprx_time_charts(
             target,
             profile,
+            previous_profile.loc[
+                previous_profile["market_regime"].isin(regimes)
+            ].copy(),
             visible_areas,
             price_unit,
             notice=LEGACY_PERIOD_NOTICE if has_legacy_regime else None,
