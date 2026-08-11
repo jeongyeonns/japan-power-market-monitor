@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import time
 from functools import lru_cache
 from datetime import date, datetime
 from typing import Any
@@ -19,6 +20,7 @@ MAX_INPUT_CHARACTERS = 30000
 EPRX_AI_MAX_OUTPUT_TOKENS = 2000
 EPRX_AI_REASONING_EFFORT = "minimal"
 EPRX_AI_VERBOSITY = "low"
+EPRX_AI_REQUEST_TIMEOUT_SECONDS = 90.0
 EVIDENCE_REL_TOLERANCE = 0.02
 EVIDENCE_ABS_TOLERANCE = 0.005
 PAYLOAD_VERSION = "1.0"
@@ -346,7 +348,9 @@ def _error_result(exc: Exception, fallback: dict[str, Any]) -> dict[str, Any]:
                                       "msg": item.get("msg")} for item in errors_method()]
             if validation_errors: break
         candidate = getattr(candidate, "__cause__", None) or getattr(candidate, "__context__", None)
-    if "authentication" in lower or status_code == 401:
+    if "timeout" in lower:
+        status, message = "api_timeout", "AI 분석 요청이 90초 안에 완료되지 않았습니다. 잠시 후 다시 시도해 주세요."
+    elif "authentication" in lower or status_code == 401:
         status, message = "api_auth_error", "OpenAI API 인증에 실패했습니다. API 키 설정을 확인해 주세요."
     elif "ratelimit" in lower or status_code == 429:
         status, message = "api_rate_limit", "OpenAI API 사용 한도 또는 호출 제한에 도달했습니다."
@@ -382,12 +386,18 @@ def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | N
     if _known_unsupported_model(selected_model):
         return {"status": "unsupported_model", "message": "설정된 OpenAI 모델은 Structured Outputs를 지원하지 않습니다.",
                 "model": selected_model, "fallback": fallback}
-    built = build_eprx_ai_payload(analysis_context); context_hash = built["diagnostics"]["context_hash"]
+    payload_started = time.perf_counter()
+    built = build_eprx_ai_payload(analysis_context)
+    payload_elapsed = time.perf_counter() - payload_started
+    context_hash = built["diagnostics"]["context_hash"]
     try:
         if _client_factory is None:
             from openai import OpenAI
             _client_factory = OpenAI
         client = _client_factory(api_key=key, max_retries=0)
+        request_client = client.with_options(
+            timeout=EPRX_AI_REQUEST_TIMEOUT_SECONDS, max_retries=0
+        ) if hasattr(client, "with_options") else client
     except (ImportError, ModuleNotFoundError) as exc:
         return {"status": "dependency_missing", "message": str(exc), "fallback": fallback}
     request_payload = {"expected_response_metadata": {"context_hash": context_hash, "model": selected_model},
@@ -406,7 +416,9 @@ def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | N
     request_text = json.dumps(request_payload, ensure_ascii=False, separators=(",", ":"))
     request_diagnostics = {"model": selected_model, "max_output_tokens": EPRX_AI_MAX_OUTPUT_TOKENS,
         "reasoning_effort": EPRX_AI_REASONING_EFFORT, "verbosity": EPRX_AI_VERBOSITY,
-        "input_character_count": len(request_text)}
+        "input_character_count": len(request_text), "timeout_seconds": EPRX_AI_REQUEST_TIMEOUT_SECONDS,
+        "max_retries": 0, "application_max_attempts": max(1, _max_attempts),
+        "payload_elapsed_seconds": payload_elapsed, "api_calls": 0}
     request = {"model": selected_model, "instructions": instructions,
         "input": request_text, "max_output_tokens": EPRX_AI_MAX_OUTPUT_TOKENS, "store": False,
         "reasoning": {"effort": EPRX_AI_REASONING_EFFORT},
@@ -415,8 +427,25 @@ def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | N
     last_error = None
     for attempt in range(max(1, _max_attempts)):
         try:
-            response = client.responses.parse(**request)
+            request_diagnostics["api_calls"] += 1
+            api_started = time.perf_counter()
+            raw_resource = getattr(request_client.responses, "with_raw_response", None)
+            if raw_resource is not None and hasattr(raw_resource, "parse"):
+                raw_response = raw_resource.parse(**request)
+                api_elapsed = time.perf_counter() - api_started
+                parse_started = time.perf_counter()
+                response = raw_response.parse()
+                parse_elapsed = time.perf_counter() - parse_started
+                retries_taken = getattr(raw_response, "retries_taken", 0)
+            else:
+                response = request_client.responses.parse(**request)
+                api_elapsed = time.perf_counter() - api_started
+                parse_elapsed = 0.0
+                retries_taken = 0
             diagnostics = _response_diagnostics(response)
+            diagnostics.update({"api_elapsed_seconds": api_elapsed,
+                                "parse_elapsed_seconds": parse_elapsed,
+                                "sdk_retries_taken": retries_taken})
             if diagnostics["response_status"] != "completed":
                 return {"status": "api_incomplete_response",
                         "message": "AI 응답 생성이 완료되지 않았습니다. 다시 시도해 주세요.",
@@ -430,9 +459,11 @@ def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | N
                 parsed = parsed_object.model_dump() if hasattr(parsed_object, "model_dump") else dict(parsed_object)
             else:
                 parsed = _parse_json_fallback(_value(response, "output_text", ""))
+            validation_started = time.perf_counter()
             checked = validate_eprx_ai_response(parsed, expected_region=analysis_context["region"],
                 expected_week_start=built["payload"]["week"]["start"], expected_context_hash=context_hash,
                 input_payload=request_payload)
+            diagnostics["validation_elapsed_seconds"] = time.perf_counter() - validation_started
             if not checked["valid"]:
                 return {"status": "api_response_validation_error",
                         "message": "AI 응답 내용이 입력 데이터 검증을 통과하지 못했습니다. 다시 시도해 주세요.",

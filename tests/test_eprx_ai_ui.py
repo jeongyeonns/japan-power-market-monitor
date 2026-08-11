@@ -83,6 +83,7 @@ class RenderTarget:
         self.expanders = []
         self.markdowns = []
         self.writes = []
+        self.json_values = []
         self.clicked_labels = set(clicked_labels)
 
     def button(self, label, **kwargs):
@@ -101,6 +102,9 @@ class RenderTarget:
 
     def write(self, value, **kwargs):
         self.writes.append(value)
+
+    def json(self, value, **kwargs):
+        self.json_values.append(value)
 
     def __getattr__(self, _name):
         return lambda *args, **kwargs: None
@@ -143,7 +147,10 @@ def test_generate_button_visible_for_ready_and_cached_states(monkeypatch):
         target = _render(monkeypatch, cached=cached)
         generate = next(item for item in target.buttons if item[0] == "AI 분석 생성")
         assert generate[1]["disabled"] is False
-        assert target.expanders == [("상세 통계 분석", {"expanded": False})]
+        expected = [("상세 통계 분석", {"expanded": False})]
+        if cached:
+            expected.append(("개발용 성능 진단", {"expanded": False}))
+        assert target.expanders == expected
         assert target.heavy_calls == []
 
 
@@ -254,7 +261,10 @@ def test_heavy_context_runs_only_after_enabled_button_click(monkeypatch):
     assert before.heavy_calls == []
     after = _render(monkeypatch, clicked_labels={"AI 분석 생성"})
     assert len(after.heavy_calls) == 1
-    assert after.expanders == [("상세 통계 분석", {"expanded": False})]
+    assert after.expanders == [("상세 통계 분석", {"expanded": False}),
+                               ("개발용 성능 진단", {"expanded": False})]
+    assert after.json_values[-1]["total_seconds"] >= 0
+    assert "readiness_seconds" in after.json_values[-1]
 
 
 def test_readiness_cache_key_changes_with_grid_or_selected_eprx_fingerprint():

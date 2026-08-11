@@ -242,6 +242,45 @@ def test_api_errors_do_not_trigger_implicit_second_request():
     assert auth.calls == 1
 
 
+def test_timeout_is_bounded_and_not_retried():
+    ctx = context()
+    class APITimeoutError(Exception): pass
+    class Responses:
+        def __init__(self): self.calls = 0
+        def parse(self, **_kwargs): self.calls += 1; raise APITimeoutError()
+    responses = Responses()
+    result = generate_eprx_ai_analysis(ctx, api_key="fake-test-key",
+        _client_factory=lambda **_kwargs: type("Client", (), {"responses": responses})())
+    assert result["status"] == "api_timeout"
+    assert "90초" in result["message"] and responses.calls == 1
+    assert result["request_diagnostics"]["timeout_seconds"] == 90.0
+
+
+def test_raw_response_timing_and_per_request_options_are_recorded():
+    ctx = context(); parsed = Parsed(response_for(ctx))
+    response = api_response(parsed=parsed)
+    class Raw:
+        retries_taken = 0
+        def parse(self): return response
+    class RawResponses:
+        def parse(self, **_kwargs): return Raw()
+    class Responses:
+        with_raw_response = RawResponses()
+    class Client:
+        responses = Responses()
+        def __init__(self): self.options = None
+        def with_options(self, **options): self.options = options; return self
+    client = Client()
+    result = generate_eprx_ai_analysis(ctx, api_key="fake-test-key",
+        _client_factory=lambda **_kwargs: client)
+    assert result["status"] == "ok"
+    assert client.options == {"timeout": 90.0, "max_retries": 0}
+    assert result["request_diagnostics"]["api_calls"] == 1
+    assert result["response_diagnostics"]["sdk_retries_taken"] == 0
+    assert result["response_diagnostics"]["api_elapsed_seconds"] >= 0
+    assert result["response_diagnostics"]["parse_elapsed_seconds"] >= 0
+
+
 def test_api_error_categories_and_unsupported_model():
     ctx = context()
     cases = (("AuthenticationError", 401, "api_auth_error"),

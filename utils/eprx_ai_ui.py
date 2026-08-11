@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from typing import Any, Callable, MutableMapping
 
 import pandas as pd
@@ -248,7 +249,11 @@ def render_eprx_ai_result(target, result: dict[str, Any]) -> None:
                 _render_values(target, values)
         return
     if result.get("status") != "ok":
-        target.warning(result.get("message", "AI 분석 결과를 사용할 수 없습니다.")); return
+        target.warning(result.get("message", "AI 분석 결과를 사용할 수 없습니다."))
+        if result.get("fallback"):
+            with target.expander("Python FAST 요약", expanded=False):
+                target.json(result["fallback"])
+        return
     target.markdown(f"#### {result['headline']}")
     target.write(result["summary"])
     sections = (("모집량 패턴", "confirmed_findings"), ("이번 주 핵심", "statistical_interpretation"),
@@ -269,14 +274,19 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
     if region not in {"Tokyo", "Chubu"}:
         return
     import streamlit as st
+    section_started = time.perf_counter()
+    timing_key = f"eprx_ai_timing:{region}:{pd.Timestamp(week_start).date()}"
+    timings: dict[str, Any] = dict(st.session_state.get(timing_key, {}))
     target.divider(); target.subheader("AI 모집량 분석")
     grid_fingerprint = local_grid_week_fingerprint(region, week_start)["fingerprint"]
     full_grid_fingerprint = local_grid_file_fingerprint(region)["fingerprint"]
     readiness_key = make_readiness_cache_key(eprx_df, region, week_start, grid_fingerprint)
     fast_context_key = make_fast_context_cache_key(eprx_df, region, week_start, full_grid_fingerprint)
+    readiness_started = time.perf_counter()
     if readiness_key not in st.session_state:
         st.session_state[readiness_key] = check_eprx_ai_readiness(eprx_df, region, week_start)
     readiness = st.session_state[readiness_key]
+    timings["readiness_seconds"] = time.perf_counter() - readiness_started
     target.caption(f"선택 지역: {region} · 선택 주차: {pd.Timestamp(week_start):%Y-%m-%d}")
     rate = float(readiness.get("join_rate", 0.0))
     if readiness.get("latest_source_date"):
@@ -297,19 +307,25 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
     result = _cached_analysis_result(st.session_state, region, week_start)
     if clicked or regenerate:
         with target.spinner("데이터 요약을 준비하고 있습니다..."):
+            context_started = time.perf_counter()
             local, _ = get_or_build_fast_local_context(st.session_state, fast_context_key,
                 region, week_start, lambda: load_local_eprx_grid_context(eprx_df, region, week_start))
+            timings["context_seconds"] = time.perf_counter() - context_started
             if local["status"] != "ok":
                 target.warning(local.get("message", "분석 context를 생성하지 못했습니다."))
                 return
             context = local["analysis_context"]
         with target.spinner("AI가 주간 데이터를 해석하고 있습니다..."):
+            generation_started = time.perf_counter()
             result = run_ai_analysis_action(context=context, region=region, week_start=week_start,
                 file_fingerprint=local["file_fingerprint"], model=model, session_state=st.session_state,
                 clicked=True, regenerate=regenerate)
+            timings["generation_seconds"] = time.perf_counter() - generation_started
+            cache_started = time.perf_counter()
             display_key = (f"eprx_ai_display:{region}:{pd.Timestamp(week_start).date()}:"
                            f"{readiness['file_fingerprint']}:{model}")
             st.session_state[display_key] = result
+            timings["cache_seconds"] = time.perf_counter() - cache_started
     with target.expander("상세 통계 분석", expanded=False):
         detailed_clicked = target.button("상세 통계 계산",
             key=f"eprx_ai_detailed_{region}_{pd.Timestamp(week_start).date()}")
@@ -321,5 +337,26 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
                     f"detailed:{fast_context_key}", lambda: build_detailed_context(local, region, week_start))
                 target.json(build_eprx_statistical_fallback(detailed))
     if result:
+        render_started = time.perf_counter()
         render_eprx_ai_result(target, result)
+        timings["render_seconds"] = time.perf_counter() - render_started
+        response_diagnostics = result.get("response_diagnostics", {})
+        request_diagnostics = result.get("request_diagnostics", {})
+        timings.update({
+            "payload_seconds": request_diagnostics.get("payload_elapsed_seconds"),
+            "api_seconds": response_diagnostics.get("api_elapsed_seconds"),
+            "parse_seconds": response_diagnostics.get("parse_elapsed_seconds"),
+            "validation_seconds": response_diagnostics.get("validation_elapsed_seconds"),
+            "api_calls": request_diagnostics.get("api_calls", 0),
+            "input_tokens": response_diagnostics.get("input_tokens"),
+            "output_tokens": response_diagnostics.get("output_tokens"),
+            "reasoning_tokens": response_diagnostics.get("reasoning_tokens"),
+            "model": result.get("model") or request_diagnostics.get("model"),
+        })
+        timings["total_seconds"] = time.perf_counter() - section_started
+        st.session_state[timing_key] = timings
+    saved_timings = st.session_state.get(timing_key)
+    if saved_timings:
+        with target.expander("개발용 성능 진단", expanded=False):
+            target.json(saved_timings)
     target.caption("본 분석은 공개된 30분 실적자료를 이용한 사후 통계분석입니다. 수요는 공개자료 기반 실적치이며 의사결정 당시 예측자료와 다를 수 있습니다. 평상시분·비상시분·수의계약량·자연체여력은 분리되어 있지 않습니다. 통계적 연관성은 인과관계를 의미하지 않으며 모집량 예측 결과가 아닙니다.")
