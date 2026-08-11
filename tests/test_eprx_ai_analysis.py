@@ -90,6 +90,17 @@ def test_payload_limits_relation_detail_to_runtime_evidence_set():
     assert len(built["selected_associations"]) == 5
 
 
+def test_payload_supplies_display_ready_values_and_prompt_requires_them():
+    ctx = context()
+    ctx["selected_week"]["procurement"] = {"mean": 572.4255952380952, "minimum": 544, "maximum": 599}
+    ctx["selected_week"]["procurement_change"] = {
+        "previous": 504.42261904761904, "change": 68.00297619047615, "change_pct": 13.4817}
+    payload = build_eprx_ai_payload(ctx)["payload"]
+    assert payload["display_values"]["procurement_mean"] == "572.4 MW"
+    assert payload["display_values"]["week_change"] == "68.0 MW"
+    assert payload["display_values"]["week_change_pct"] == "13.5%"
+
+
 def test_invalid_context_never_calls_client():
     called = []
     result = generate_eprx_ai_analysis({}, api_key="fake-test-key", _client_factory=lambda **kw: called.append(kw))

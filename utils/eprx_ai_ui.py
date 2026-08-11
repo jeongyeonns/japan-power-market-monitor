@@ -81,6 +81,100 @@ def format_number(value: Any, decimals: int = 2) -> str:
     return "—" if number is None else f"{number:,.{decimals}f}"
 
 
+def semantic_metric_type(metric_path: str, unit: str = "") -> str:
+    path = metric_path.lower()
+    if any(token in path for token in ("r_squared", "adjusted_r_squared")):
+        return "r_squared"
+    if any(token in path for token in ("pearson", "spearman", "correlation")):
+        return "correlation"
+    if any(token in path for token in ("_pct", "percent", "change_pct", "join_rate", "share")):
+        return "percent"
+    if any(token in path for token in ("count", "rows", "observations", "sample_count", ".n")):
+        return "count"
+    if any(token in path for token in ("procurement", "demand", "renewable_generation", "ramp", "_mw")):
+        return "mw"
+    normalized_unit = unit.strip().lower()
+    if normalized_unit == "mw": return "mw"
+    if normalized_unit in {"%", "percentage"}: return "percent"
+    if normalized_unit in {"count", "개", "건", "행"}: return "count"
+    return "number"
+
+
+def correlation_strength(value: Any) -> str:
+    number = _finite_number(value)
+    if number is None or abs(number) < 0.20: return "뚜렷한 관계 없음"
+    if abs(number) < 0.40: return "약한 관계"
+    if abs(number) < 0.60: return "중간 수준의 관계"
+    if abs(number) < 0.80: return "강한 관계"
+    return "매우 강한 관계"
+
+
+def _clock_label(value: Any) -> str:
+    try:
+        hour, minute = (int(part) for part in str(value).split(":")[:2])
+    except (TypeError, ValueError):
+        return str(value)
+    period = "오전" if hour < 12 else "오후"
+    display_hour = hour % 12 or 12
+    return f"{period} {display_hour}시" + (f" {minute}분" if minute else "")
+
+
+def _association_sentence(name: str, relation: dict[str, Any]) -> str:
+    pearson = _finite_number(relation.get("pearson")); spearman = _finite_number(relation.get("spearman"))
+    if pearson is None or spearman is None:
+        return f"{name}와 모집량의 관계를 계산할 자료가 충분하지 않습니다."
+    direction = "같이 증가하는" if pearson >= 0 else "반대로 움직이는"
+    agreement = ("두 방식으로 확인해도 같은 방향의 관계가 나타났습니다." if pearson * spearman >= 0
+                 else "두 방식의 관계 방향이 달라 일관된 경향으로 보기는 어렵습니다.")
+    return (f"{name}가 높은 시간대일수록 모집량도 {direction} 경향이 나타났습니다. "
+            f"관계의 크기는 {correlation_strength(pearson)}입니다"
+            f"(r = {format_correlation(pearson)}, ρ = {format_correlation(spearman)}). {agreement}")
+
+
+def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
+    selected = context.get("selected_week", {}); procurement = selected.get("procurement", {})
+    comparison = selected.get("procurement_change", {}) or {}
+    notable = selected.get("notable_time_blocks", {}) or {}
+    high = (notable.get("highest") or [{}])[0]; low = (notable.get("lowest") or [{}])[0]
+    changes = selected.get("driver_changes", {}) or {}
+    demand_change = changes.get("mean_demand_mw", {}) or {}
+    residual_change = changes.get("mean_residual_demand_proxy_mw", {}) or {}
+    relations = context.get("selected_week_correlations", {}) or context.get("time_adjusted_correlations", {})
+    demand = relations.get("demand_mw", {}); residual = relations.get("residual_demand_proxy_mw", {})
+    mean = procurement.get("mean"); previous = comparison.get("previous"); change = comparison.get("change")
+    change_pct = comparison.get("change_pct")
+    direction = "증가" if (_finite_number(change) or 0) >= 0 else "감소"
+    overview = [
+        f"이번 주 평균 모집량은 {format_mw(mean)}로 전주보다 {format_mw(abs(_finite_number(change) or 0))}({format_percent(abs(_finite_number(change_pct) or 0))}) {direction}했습니다.",
+        f"모집량은 {_clock_label(high.get('time_block'))}에 가장 높고 {_clock_label(low.get('time_block'))}에 가장 낮은 시간대별 패턴을 보였습니다.",
+        "전력수요와 잔여수요가 높은 시간대일수록 모집량도 대체로 함께 높아지는 경향을 비교했습니다.",
+    ]
+    procurement_lines = [
+        f"평균 모집량은 {format_mw(mean)}로, 전주 {format_mw(previous)}보다 {format_mw(abs(_finite_number(change) or 0))} {direction}했습니다.",
+        f"이번 주 모집량은 {format_mw(procurement.get('minimum'))}~{format_mw(procurement.get('maximum'))} 범위에서 움직였습니다.",
+        f"{_clock_label(high.get('time_block'))} 평균 {format_mw(high.get('average_procurement_mw'))}로 가장 높았고, {_clock_label(low.get('time_block'))} 평균 {format_mw(low.get('average_procurement_mw'))}로 가장 낮았습니다.",
+    ]
+    demand_sentence = _association_sentence("전력수요", demand)
+    residual_sentence = _association_sentence(
+        "잔여수요 추정치(전력수요에서 태양광·풍력 발전량을 뺀 값)", residual)
+    demand_r = _finite_number(demand.get("pearson")); residual_r = _finite_number(residual.get("pearson"))
+    comparison_sentence = "전력수요와 잔여수요 중 어느 하나가 모집량을 뚜렷하게 더 잘 설명한다고 보기는 어렵습니다."
+    if demand_r is not None and residual_r is not None and abs(demand_r - residual_r) >= 0.10:
+        stronger = "전력수요" if abs(demand_r) > abs(residual_r) else "잔여수요"
+        comparison_sentence = f"이번 주 자료에서는 {stronger}와 모집량의 관계가 상대적으로 더 크게 나타났습니다."
+    demand_context = (f"주간 평균 전력수요는 {format_mw(demand_change.get('current'))}, "
+                      f"잔여수요는 {format_mw(residual_change.get('current'))}였습니다. ")
+    interpretation = [
+        "이번 주에는 모집량이 전주보다 전반적으로 높았고, 수요와 잔여수요가 높은 시간대에 모집량도 함께 높아지는 모습이 나타났습니다.",
+        "다만 시간대별 모집 패턴이 반복될 수 있으므로 수요가 모집량 변화를 직접 만들었다기보다 높은 시간대가 상당 부분 겹쳤다고 보는 것이 적절합니다.",
+    ]
+    return {"overview": overview, "procurement_changes": procurement_lines,
+        "relationships": [demand_context + demand_sentence, residual_sentence, comparison_sentence],
+        "interpretation": interpretation,
+        "notes": ["이번 결과는 공개된 30분 단위 실제 실적을 비교한 결과이며 인과관계를 의미하지 않습니다.",
+                  "잔여수요는 공식 발표값이 아니라 전력수요에서 태양광·풍력 발전량을 제외해 계산한 추정치입니다."]}
+
+
 def _evidence_display_name(evidence: dict[str, Any]) -> str:
     path = str(evidence.get("metric_path", ""))
     for metric, display in sorted(DISPLAY_NAMES.items(), key=lambda item: -len(item[0])):
@@ -94,22 +188,21 @@ def _format_evidence(evidence: dict[str, Any]) -> str:
     value = evidence.get("value")
     path = str(evidence.get("metric_path", "")).lower()
     unit = str(evidence.get("unit", "")).strip()
-    if "r_squared" in path:
+    metric_type = semantic_metric_type(path, unit)
+    if metric_type == "r_squared":
         metric = f"R² = {format_number(value)}"
     elif "spearman" in path:
         metric = f"Spearman ρ = {format_correlation(value)}"
-    elif any(token in path for token in ("pearson", "correlation", "coefficient")) or unit in {
-        "coefficient", "상관계수", "unitless"
-    }:
+    elif metric_type == "correlation":
         metric = f"Pearson r = {format_correlation(value)}"
     elif "percentile" in path:
         metric = f"백분위 {format_number(value, 1)}"
-    elif unit == "MW" or path.endswith("_mw"):
+    elif metric_type == "mw":
         metric = format_mw(value)
-    elif unit in {"%", "percentage"}:
+    elif metric_type == "percent":
         metric = format_percent(value)
-    elif unit in {"count", "개", "행", "회"}:
-        metric = f"{format_number(value, 0)}건"
+    elif metric_type == "count":
+        metric = f"{format_number(value, 0)}개"
     else:
         metric = format_number(value)
     interpretation = str(evidence.get("interpretation", "")).strip()
@@ -232,12 +325,27 @@ def run_ai_analysis_action(*, context: dict[str, Any], region: str, week_start: 
     if key in session_state and not regenerate: return session_state[key]
     if not clicked: return None
     result = generator(context, model=model)
+    if result.get("status") == "ok":
+        result = {**result, "presentation": build_eprx_readable_presentation(context)}
     session_state[key] = result
     return result
 
 
 def render_eprx_ai_result(target, result: dict[str, Any]) -> None:
     """Render the structured AI response used by the live Streamlit section."""
+    presentation = result.get("presentation")
+    if result.get("status") == "ok" and isinstance(presentation, dict):
+        sections = (("한눈에 보기", "overview"), ("모집량 변화", "procurement_changes"),
+                    ("수요·잔여수요와의 관계", "relationships"),
+                    ("이렇게 해석하면 됩니다", "interpretation"), ("참고", "notes"))
+        for title, field in sections:
+            target.markdown(f"### {title}")
+            values = presentation.get(field, [])
+            if field in {"overview", "interpretation"}:
+                for value in values: target.write(value)
+            else:
+                for value in values: target.markdown(f"- {value}")
+        return
     if result.get("status") == "ok" and "procurement_patterns" in result:
         target.markdown("#### AI 주간 모집량 분석")
         target.write(result["summary"])

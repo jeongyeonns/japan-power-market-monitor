@@ -254,6 +254,58 @@ def test_metric_formatters_are_nan_safe_and_never_use_scientific_notation():
         assert formatter(float("nan")) == "—"
 
 
+def test_semantic_metric_type_beats_incorrect_coefficient_unit():
+    procurement = {"metric_path": "analysis.procurement_summary.mean", "display_name": "주간 평균 모집량",
+                   "value": 572.4255952380952, "unit": "coefficient", "interpretation": ""}
+    rendered = eprx_ai_ui._format_evidence(procurement)
+    assert "572.4 MW" in rendered
+    assert "Pearson" not in rendered and "coefficient" not in rendered
+    assert eprx_ai_ui.semantic_metric_type("analysis.selected_associations.0.pearson", "") == "correlation"
+    assert eprx_ai_ui.semantic_metric_type("analysis.week_change_pct", "") == "percent"
+
+
+def test_correlation_strength_uses_plain_korean_thresholds():
+    assert eprx_ai_ui.correlation_strength(0.19) == "뚜렷한 관계 없음"
+    assert eprx_ai_ui.correlation_strength(-0.20) == "약한 관계"
+    assert eprx_ai_ui.correlation_strength(0.40) == "중간 수준의 관계"
+    assert eprx_ai_ui.correlation_strength(-0.60) == "강한 관계"
+    assert eprx_ai_ui.correlation_strength(0.80) == "매우 강한 관계"
+
+
+def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
+    context = {"selected_week": {
+        "procurement": {"mean": 572.4255952380952, "minimum": 544, "maximum": 599},
+        "procurement_change": {"previous": 504.42261904761904, "change": 68.00297619047615,
+                               "change_pct": 13.4817},
+        "notable_time_blocks": {
+            "highest": [{"time_block": "08:30", "average_procurement_mw": 591.1428571428571}],
+            "lowest": [{"time_block": "03:00", "average_procurement_mw": 548.2857142857143}]},
+        "driver_changes": {
+            "mean_demand_mw": {"current": 40022.9},
+            "mean_residual_demand_proxy_mw": {"current": 35877.1}},
+    }, "selected_week_correlations": {
+        "demand_mw": {"pearson": 0.5775835870089938, "spearman": 0.46633704875086757},
+        "residual_demand_proxy_mw": {"pearson": 0.5629575833976636,
+                                      "spearman": 0.45282089618210863}},
+    }
+    presentation = eprx_ai_ui.build_eprx_readable_presentation(context)
+    result = {"status": "ok", "summary": "unused", "procurement_patterns": [],
+              "associations": [], "cautions": [], "presentation": presentation}
+    target = _render(monkeypatch, cached=True, cached_result=result)
+    rendered = "\n".join(target.markdowns + target.writes)
+    for expected in ("572.4 MW", "504.4 MW", "68.0 MW", "13.5%", "544.0", "599.0",
+                     "591.1 MW", "548.3 MW", "40,022.9 MW", "35,877.1 MW",
+                     "r = +0.58", "ρ = +0.47", "r = +0.56", "ρ = +0.45", "잔여수요"):
+        assert expected in rendered
+    for forbidden in ("572.425595", "504.422619", "0.577583587", "Pearson r = +572",
+                      "Pearson r = +544", "coefficient", "residual_demand_proxy_mw",
+                      "Spearman CI ["):
+        assert forbidden not in rendered
+    assert rendered.index("한눈에 보기") < rendered.index("수요·잔여수요와의 관계")
+    assert "중간 수준의 관계" in rendered and "인과관계를 의미하지 않습니다" in rendered
+    assert "유의" not in rendered
+
+
 def test_heavy_context_runs_only_after_enabled_button_click(monkeypatch):
     monkeypatch.setattr(eprx_ai_ui, "run_ai_analysis_action", lambda **_kwargs: {
         "status": "ok", "headline": "완료", "summary": "요약"})

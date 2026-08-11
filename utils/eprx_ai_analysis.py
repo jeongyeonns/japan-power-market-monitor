@@ -44,6 +44,16 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _display_number(value: Any, kind: str) -> str | None:
+    try: number = float(value)
+    except (TypeError, ValueError): return None
+    if not math.isfinite(number): return None
+    if kind == "mw": return f"{number:,.1f} MW"
+    if kind == "percent": return f"{number:.1f}%"
+    if kind == "correlation": return f"{number:+.2f}"
+    return f"{number:,.1f}"
+
+
 def calculate_eprx_context_hash(analysis_context: dict[str, Any]) -> str:
     encoded = json.dumps(_json_safe(analysis_context), ensure_ascii=False, sort_keys=True,
                          separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -117,6 +127,20 @@ def build_eprx_ai_payload(analysis_context: dict[str, Any]) -> dict[str, Any]:
             ("expected_weekly_rows", "actual_rows", "duplicate_datetime_rows", "missing_procurement_count")},
         "limitations": list(dict.fromkeys(analysis_context.get("limitations", [])))[:2],
     })
+    procurement = selected.get("procurement") or {}
+    previous = selected.get("procurement_change") or {}
+    payload["display_values"] = {
+        "procurement_mean": _display_number(procurement.get("mean"), "mw"),
+        "procurement_minimum": _display_number(procurement.get("minimum"), "mw"),
+        "procurement_maximum": _display_number(procurement.get("maximum"), "mw"),
+        "previous_week_mean": _display_number(previous.get("previous"), "mw"),
+        "week_change": _display_number(previous.get("change"), "mw"),
+        "week_change_pct": _display_number(previous.get("change_pct"), "percent"),
+        "associations": [{"display_name": item["display_name"],
+            "pearson": _display_number(item.get("pearson"), "correlation"),
+            "spearman": _display_number(item.get("spearman"), "correlation")}
+            for item in associations[:5]],
+    }
     payload, excluded = _trim_payload(payload)
     text = json.dumps(payload, ensure_ascii=False, allow_nan=False)
     if len(text) > MAX_INPUT_CHARACTERS: raise ValueError("AI payload exceeds the configured character limit")
@@ -407,11 +431,13 @@ def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | N
                        "analysis": built["payload"]}
     request_payload["metric_catalog"] = _numeric_metric_catalog(request_payload)
     instructions = (
-        "일본 EPRX 1차 조정력 주간 데이터를 해석하는 전력시장 분석가로서 한국어로 답하세요. "
-        "이번 주 핵심을 2~3문장으로 요약하고, 모집량 패턴은 최대 3개, 계통 변수 연관성은 최대 3개, "
+        "일본 전력시장 실무자를 위한 EPRX 1차 조정력 주간 분석가로서 한국어로 답하세요. "
+        "모집량 수준, 전주 변화, 시간대별 패턴을 먼저 설명한 뒤 전력수요와 잔여수요를 비교하세요. "
+        "이번 주 핵심은 2~3문장, 모집량 패턴은 최대 3개, 계통 변수 연관성은 최대 3개, "
         "주의점은 최대 2개로 작성하세요. 상관계수를 나열하거나 같은 계열 변수를 반복하지 말고, "
         "인과관계로 표현하지 마세요. 유의성 검정을 하지 않았으므로 '유의'라는 표현을 쓰지 마세요. "
-        "정량 evidence는 metric_catalog의 metric_path와 값을 그대로 사용하세요."
+        "내부 변수명, 영어 한계 문구, 어려운 통계 용어는 쓰지 마세요. 숫자는 display_values의 문자열을 그대로 사용하고 "
+        "재계산하거나 소수 자릿수를 늘리지 마세요. 정량 evidence는 metric_catalog의 metric_path와 값을 그대로 사용하세요."
     )
     request_text = json.dumps(request_payload, ensure_ascii=False, separators=(",", ":"))
     request_diagnostics = {"model": selected_model, "max_output_tokens": EPRX_AI_MAX_OUTPUT_TOKENS,
