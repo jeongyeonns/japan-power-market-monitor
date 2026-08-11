@@ -131,6 +131,24 @@ def _association_sentence(name: str, relation: dict[str, Any]) -> str:
             f"(r = {format_correlation(pearson)}, ρ = {format_correlation(spearman)}). {agreement}")
 
 
+def _signed_mw(value: Any) -> str:
+    number = _finite_number(value)
+    return "—" if number is None else f"{number:+,.1f} MW"
+
+
+def _signed_percent(value: Any) -> str:
+    number = _finite_number(value)
+    return "—" if number is None else f"{number:+.1f}%"
+
+
+def _relationship_label(relation: dict[str, Any]) -> str:
+    pearson = _finite_number(relation.get("pearson")); spearman = _finite_number(relation.get("spearman"))
+    if pearson is None or spearman is None: return "자료 부족"
+    direction = "같은 방향" if pearson >= 0 else "반대 방향"
+    return (f"{correlation_strength(pearson)}의 {direction} 관계 "
+            f"(r = {format_correlation(pearson)}, ρ = {format_correlation(spearman)})")
+
+
 def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
     selected = context.get("selected_week", {}); procurement = selected.get("procurement", {})
     comparison = selected.get("procurement_change", {}) or {}
@@ -168,7 +186,34 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
         "이번 주에는 모집량이 전주보다 전반적으로 높았고, 수요와 잔여수요가 높은 시간대에 모집량도 함께 높아지는 모습이 나타났습니다.",
         "다만 시간대별 모집 패턴이 반복될 수 있으므로 수요가 모집량 변화를 직접 만들었다기보다 높은 시간대가 상당 부분 겹쳤다고 보는 것이 적절합니다.",
     ]
-    return {"overview": overview, "procurement_changes": procurement_lines,
+    cards = [
+        {"label": "이번 주 평균 모집량", "value": format_mw(mean),
+         "delta": f"{_signed_mw(change)} ({_signed_percent(change_pct)})"},
+        {"label": "전주 평균 모집량", "value": format_mw(previous), "delta": None},
+        {"label": "최고 시간대", "value": f"{high.get('time_block') or '—'} / {format_mw(high.get('average_procurement_mw'))}",
+         "delta": None},
+        {"label": "최저 시간대", "value": f"{low.get('time_block') or '—'} / {format_mw(low.get('average_procurement_mw'))}",
+         "delta": None},
+    ]
+    procurement_table = [
+        {"항목": "이번 주 평균 모집량", "값": format_mw(mean)},
+        {"항목": "전주 평균 모집량", "값": format_mw(previous)},
+        {"항목": "전주 대비 변화", "값": f"{_signed_mw(change)} ({_signed_percent(change_pct)})"},
+        {"항목": "주간 범위", "값": f"{format_mw(procurement.get('minimum'))} ~ {format_mw(procurement.get('maximum'))}"},
+        {"항목": "최고 시간대", "값": f"{high.get('time_block') or '—'} / {format_mw(high.get('average_procurement_mw'))}"},
+        {"항목": "최저 시간대", "값": f"{low.get('time_block') or '—'} / {format_mw(low.get('average_procurement_mw'))}"},
+    ]
+    relationship_table = [
+        {"변수": "전력수요", "이번 주 평균": format_mw(demand_change.get("current")),
+         "모집량과의 관계": _relationship_label(demand),
+         "해석": "수요가 높은 시간대일수록 모집량도 대체로 함께 높았습니다."},
+        {"변수": "잔여수요 추정치", "이번 주 평균": format_mw(residual_change.get("current")),
+         "모집량과의 관계": _relationship_label(residual),
+         "해석": "재생에너지 출력을 제외한 수요 부담과 모집량이 함께 움직이는 경향을 확인했습니다."},
+    ]
+    return {"summary_cards": cards, "overview": overview,
+        "procurement_table": procurement_table, "procurement_changes": procurement_lines,
+        "relationship_table": relationship_table,
         "relationships": [demand_context + demand_sentence, residual_sentence, comparison_sentence],
         "interpretation": interpretation,
         "notes": ["이번 결과는 공개된 30분 단위 실제 실적을 비교한 결과이며 인과관계를 의미하지 않습니다.",
@@ -218,6 +263,25 @@ def _render_values(target, values: Any) -> None:
             target.markdown(_format_evidence(value))
         else:
             target.markdown(f"- {LIMITATION_TRANSLATIONS.get(str(value), value)}")
+
+
+def _render_summary_cards(target, cards: list[dict[str, Any]]) -> None:
+    if not cards: return
+    columns = target.columns(len(cards))
+    for column, card in zip(columns, cards):
+        kwargs = {"label": card["label"], "value": card["value"]}
+        if card.get("delta") is not None: kwargs["delta"] = card["delta"]
+        column.metric(**kwargs)
+
+
+def _render_relationship_table(target, rows: list[dict[str, Any]]) -> None:
+    target.table(pd.DataFrame(rows))
+
+
+def _render_explanation_notes(target) -> None:
+    target.info("**왜 잔여수요를 보나요?**\n\n잔여수요는 전력수요에서 태양광·풍력 등 재생에너지 발전량을 제외한 값입니다. 재생에너지 출력과 변동에 따라 계통이 부담하는 순수 수요가 달라질 수 있어 모집량과의 관계를 볼 때 전력수요와 함께 참고합니다.")
+    target.info("**이번 화면은 어떤 조정력을 분석하나요?**\n\n이 화면은 EPRX 공개자료 중 **1차 조정력(一次調整力)만 분석**합니다. 2차 조정력과 3차 조정력은 포함하지 않습니다.")
+    target.warning("**공개자료로 구분하기 어려운 항목**\n\n모집량에는 평상시분과 이상시분 등 여러 요인이 함께 반영됩니다. 공개자료만으로는 평상시분·이상시분·자연체여력 공제 효과를 완전히 분리할 수 없으므로, 공개 모집량과 수요·재생에너지 지표가 함께 움직인 경향을 참고하는 분석입니다.")
 
 
 def evaluate_eprx_ai_ui_state(*, market: str, region: str, week_start: Any,
@@ -335,16 +399,19 @@ def render_eprx_ai_result(target, result: dict[str, Any]) -> None:
     """Render the structured AI response used by the live Streamlit section."""
     presentation = result.get("presentation")
     if result.get("status") == "ok" and isinstance(presentation, dict):
-        sections = (("한눈에 보기", "overview"), ("모집량 변화", "procurement_changes"),
-                    ("수요·잔여수요와의 관계", "relationships"),
-                    ("이렇게 해석하면 됩니다", "interpretation"), ("참고", "notes"))
-        for title, field in sections:
-            target.markdown(f"### {title}")
-            values = presentation.get(field, [])
-            if field in {"overview", "interpretation"}:
-                for value in values: target.write(value)
-            else:
-                for value in values: target.markdown(f"- {value}")
+        _render_summary_cards(target, presentation.get("summary_cards", []))
+        target.markdown("### 한눈에 보기")
+        for value in presentation.get("overview", []): target.write(value)
+        target.markdown("### 모집량 변화")
+        target.table(pd.DataFrame(presentation.get("procurement_table", [])))
+        target.markdown("### 수요·잔여수요와의 관계")
+        _render_relationship_table(target, presentation.get("relationship_table", []))
+        for value in presentation.get("relationships", [])[-1:]: target.caption(value)
+        target.markdown("### 이렇게 해석하면 됩니다")
+        for value in presentation.get("interpretation", []): target.write(value)
+        target.markdown("### 참고 / 분석 안내")
+        for value in presentation.get("notes", []): target.caption(value)
+        _render_explanation_notes(target)
         return
     if result.get("status") == "ok" and "procurement_patterns" in result:
         target.markdown("#### AI 주간 모집량 분석")

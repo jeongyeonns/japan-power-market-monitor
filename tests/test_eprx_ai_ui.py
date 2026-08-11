@@ -84,6 +84,11 @@ class RenderTarget:
         self.markdowns = []
         self.writes = []
         self.json_values = []
+        self.metrics = []
+        self.tables = []
+        self.infos = []
+        self.warnings = []
+        self.captions = []
         self.clicked_labels = set(clicked_labels)
 
     def button(self, label, **kwargs):
@@ -105,6 +110,24 @@ class RenderTarget:
 
     def json(self, value, **kwargs):
         self.json_values.append(value)
+
+    def columns(self, count):
+        return [self] * count
+
+    def metric(self, **kwargs):
+        self.metrics.append(kwargs)
+
+    def table(self, value, **kwargs):
+        self.tables.append(value)
+
+    def info(self, value, **kwargs):
+        self.infos.append(value)
+
+    def warning(self, value, **kwargs):
+        self.warnings.append(value)
+
+    def caption(self, value, **kwargs):
+        self.captions.append(value)
 
     def __getattr__(self, _name):
         return lambda *args, **kwargs: None
@@ -205,7 +228,9 @@ def test_fast_result_renderer_is_immediate_and_formats_association():
             "interpretation": "중간 수준의 양의 관계입니다."}],
         "cautions": ["인과관계를 의미하지 않습니다."],
     })
-    rendered = "\n".join(target.markdowns + target.writes)
+    rendered = "\n".join(target.markdowns + target.writes + target.infos + target.warnings
+                           + target.captions + [str(item) for item in target.metrics]
+                           + [table.to_string(index=False) for table in target.tables])
     assert "이번 주 요약" in rendered and "패턴 하나" in rendered
     assert "+0.57" in rendered and "인과관계" in rendered
 
@@ -231,7 +256,15 @@ def test_live_streamlit_runtime_path_renders_cached_string_and_numbers(monkeypat
         "limitations": [], "profile_warning": "", "conclusion": "", "disclaimer": "",
     }
     target = _render(monkeypatch, cached=True, cached_result=fixture)
-    rendered = "\n".join(target.markdowns + target.writes)
+    rendered = "\n".join(
+        target.markdowns
+        + target.writes
+        + target.infos
+        + target.warnings
+        + target.captions
+        + [str(item) for item in target.metrics]
+        + [table.to_string(index=False) for table in target.tables]
+    )
     assert "피어슨·스피어만 모두 여러 변수에서 같은 방향의 관계를 보였습니다." in target.writes
     assert not any(item in target.markdowns for item in ("- 피", "- 어", "- 슨"))
     assert "572.4 MW" in rendered
@@ -292,7 +325,15 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     result = {"status": "ok", "summary": "unused", "procurement_patterns": [],
               "associations": [], "cautions": [], "presentation": presentation}
     target = _render(monkeypatch, cached=True, cached_result=result)
-    rendered = "\n".join(target.markdowns + target.writes)
+    rendered = "\n".join(
+        target.markdowns
+        + target.writes
+        + target.infos
+        + target.warnings
+        + target.captions
+        + [str(item) for item in target.metrics]
+        + [table.to_string(index=False) for table in target.tables]
+    )
     for expected in ("572.4 MW", "504.4 MW", "68.0 MW", "13.5%", "544.0", "599.0",
                      "591.1 MW", "548.3 MW", "40,022.9 MW", "35,877.1 MW",
                      "r = +0.58", "ρ = +0.47", "r = +0.56", "ρ = +0.45", "잔여수요"):
@@ -304,6 +345,10 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     assert rendered.index("한눈에 보기") < rendered.index("수요·잔여수요와의 관계")
     assert "중간 수준의 관계" in rendered and "인과관계를 의미하지 않습니다" in rendered
     assert "유의" not in rendered
+    assert len(target.metrics) == 4 and len(target.tables) == 2
+    assert "왜 잔여수요를 보나요?" in rendered
+    assert "1차 조정력(一次調整力)만 분석" in rendered and "2차 조정력과 3차 조정력" in rendered
+    assert all(term in rendered for term in ("평상시분", "이상시분", "자연체여력"))
 
 
 def test_heavy_context_runs_only_after_enabled_button_click(monkeypatch):
