@@ -149,6 +149,12 @@ def test_fast_context_builds_48_slot_demand_profile_from_seven_daily_values():
         timestamps.dt.date >= pd.Timestamp("2026-05-25").date()
     ].loc[timestamps.dt.strftime("%H:%M").eq("08:30"), "area_demand_mw"].mean()
     assert slot["demand_mw"] == pytest.approx(expected)
+    assert slot["procurement_mw"] == pytest.approx(features.loc[
+        timestamps.dt.date >= pd.Timestamp("2026-05-25").date()
+    ].loc[timestamps.dt.strftime("%H:%M").eq("08:30"), "procurement_volume"].mean())
+    assert slot["renewable_generation_mw"] == pytest.approx(features.loc[
+        timestamps.dt.date >= pd.Timestamp("2026-05-25").date()
+    ].loc[timestamps.dt.strftime("%H:%M").eq("08:30"), "renewable_generation_mw"].mean())
 
 
 def test_correlation_strength_uses_non_exaggerating_thresholds():

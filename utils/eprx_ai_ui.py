@@ -158,8 +158,13 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
     changes = selected.get("driver_changes", {}) or {}
     demand_change = changes.get("mean_demand_mw", {}) or {}
     residual_change = changes.get("mean_residual_demand_proxy_mw", {}) or {}
+    renewable_change = changes.get("mean_renewable_generation_mw", {}) or {}
     relations = context.get("selected_week_correlations", {}) or context.get("time_adjusted_correlations", {})
     demand = relations.get("demand_mw", {}); residual = relations.get("residual_demand_proxy_mw", {})
+    renewable = relations.get("renewable_generation_mw", {})
+    region = context.get("region")
+    source = ("도쿄전력파워그리드(TEPCO PG)" if region == "Tokyo"
+              else "중부전력파워그리드(Chubu PG)" if region == "Chubu" else "지역 계통운영기관")
     mean = procurement.get("mean"); previous = comparison.get("previous"); change = comparison.get("change")
     change_pct = comparison.get("change_pct")
     direction = "증가" if (_finite_number(change) or 0) >= 0 else "감소"
@@ -196,6 +201,8 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
          "delta": None},
         {"label": "최저 시간대", "value": f"{low.get('time_block') or '—'} / {format_mw(low.get('average_procurement_mw'))}",
          "delta": None},
+        {"label": "평균 재생에너지 출력량", "value": format_mw(renewable_change.get("current")),
+         "delta": None},
     ]
     procurement_table = [
         {"항목": "이번 주 평균 모집량", "값": format_mw(mean)},
@@ -208,22 +215,25 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
     relationship_table = [
         {"변수": "전력수요", "이번 주 평균": format_mw(demand_change.get("current")),
          "모집량과의 관계": _relationship_label(demand),
-         "해석": "수요가 높은 시간대일수록 모집량도 대체로 함께 높았습니다."},
+         "해석": "30분 시간대별 전력수요와 모집량이 함께 움직인 정도입니다.",
+         "데이터 출처": source, "값의 의미": "분석 주간의 30분 전력수요 실적 평균"},
         {"변수": "잔여수요 추정치", "이번 주 평균": format_mw(residual_change.get("current")),
          "모집량과의 관계": _relationship_label(residual),
-         "해석": "재생에너지 출력을 제외한 수요 부담과 모집량이 함께 움직이는 경향을 확인했습니다."},
+         "해석": "30분 시간대별 잔여수요와 모집량이 함께 움직인 정도입니다.",
+         "데이터 출처": source, "값의 의미": "전력수요에서 태양광·풍력 출력을 뺀 30분 추정치의 주간 평균"},
+        {"변수": "재생에너지 출력량", "이번 주 평균": format_mw(renewable_change.get("current")),
+         "모집량과의 관계": _relationship_label(renewable),
+         "해석": "30분 시간대별 태양광·풍력 합계와 모집량이 함께 움직인 정도입니다.",
+         "데이터 출처": source, "값의 의미": "태양광·풍력 30분 실적 합계의 분석 주간 평균"},
     ]
     both_positive = demand_r is not None and residual_r is not None and demand_r > 0 and residual_r > 0
     relationship_intro = (
         "이번 주에는 전력수요와 잔여수요가 높은 시간대에서 모집량도 대체로 함께 높아지는 경향이 나타났습니다. "
-        "아래에서는 두 수요 지표가 모집량과 얼마나 같은 방향으로 움직였는지 비교합니다."
+        "아래에서는 전력수요·잔여수요·재생에너지 출력량이 모집량과 얼마나 같은 방향으로 움직였는지 비교합니다."
         if both_positive else
-        "아래에서는 이번 주 전력수요와 잔여수요가 모집량과 어느 방향으로 얼마나 함께 움직였는지 비교합니다."
+        "아래에서는 이번 주 전력수요·잔여수요·재생에너지 출력량이 모집량과 어느 방향으로 얼마나 함께 움직였는지 비교합니다."
     )
     week = selected.get("week", {}) or {}
-    region = context.get("region")
-    source = ("도쿄전력파워그리드(TEPCO PG)" if region == "Tokyo"
-              else "중부전력파워그리드(Chubu PG)" if region == "Chubu" else "지역 계통운영기관")
     profile = selected.get("demand_intraday_profile", []) or []
     observations = sum(int(row.get("observation_count") or 0) for row in profile)
     return {"summary_cards": cards,
@@ -299,11 +309,13 @@ def _render_relationship_table(target, rows: list[dict[str, Any]]) -> None:
 def _render_intraday_demand_profile(target, rows: list[dict[str, Any]]) -> None:
     if not rows: return
     frame = pd.DataFrame(rows).rename(columns={
-        "time_block": "시간대", "demand_mw": "전력수요", "residual_demand_mw": "잔여수요",
+        "time_block": "시간대", "procurement_mw": "모집량", "demand_mw": "전력수요",
+        "residual_demand_mw": "잔여수요", "renewable_generation_mw": "재생에너지 출력량",
     })
     target.markdown("#### 시간대별 평균 추이")
-    target.line_chart(frame.set_index("시간대")[["전력수요", "잔여수요"]], use_container_width=True)
-    target.caption("각 값은 선택한 한 주의 동일 30분 시간대를 평균한 값입니다. 예를 들어 08:30 값은 해당 주 7일의 08:30 실적 평균입니다.")
+    series = [name for name in ("모집량", "전력수요", "잔여수요", "재생에너지 출력량") if name in frame]
+    target.line_chart(frame.set_index("시간대")[series], use_container_width=True)
+    target.caption("범례는 모집량·전력수요·잔여수요·재생에너지 출력량을 구분합니다. 각 값은 선택한 한 주의 동일 30분 시간대를 평균한 값입니다. 예를 들어 08:30 값은 해당 주 7일의 08:30 실적 평균입니다.")
 
 
 def _render_demand_guidance(target, presentation: dict[str, Any]) -> None:
@@ -312,7 +324,8 @@ def _render_demand_guidance(target, presentation: dict[str, Any]) -> None:
     target.info(
         "**전력수요와 잔여수요는 어떤 값인가요?**\n\n"
         f"**전력수요**는 해당 지역에서 실제로 사용된 전력수요의 30분 실적입니다. 표의 이번 주 평균은 선택 기간의 {count_text} 30분 실적을 평균한 값입니다.\n\n"
-        "**잔여수요 추정치**는 전력수요에서 태양광·풍력 발전량을 뺀 값으로, 재생에너지 발전 이후에도 계통이 공급해야 하는 수요 수준을 보기 위한 지표입니다."
+        "**잔여수요 추정치**는 전력수요에서 태양광·풍력 발전량을 뺀 값으로, 재생에너지 발전 이후에도 계통이 공급해야 하는 수요 수준을 보기 위한 지표입니다.\n\n"
+        "**재생에너지 출력량**은 공개 계통실적의 태양광·풍력 발전량을 합산한 값입니다. 표의 값은 분석 주간의 30분 단위 실적을 평균한 값입니다."
     )
     target.info(
         "**왜 잔여수요를 같이 보나요?**\n\n같은 전력수요라도 태양광·풍력 발전량에 따라 실제 계통이 부담해야 하는 수요는 달라집니다. "

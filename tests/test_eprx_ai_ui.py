@@ -320,17 +320,21 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
             "lowest": [{"time_block": "03:00", "average_procurement_mw": 548.2857142857143}]},
         "driver_changes": {
             "mean_demand_mw": {"current": 40022.9},
-            "mean_residual_demand_proxy_mw": {"current": 35877.1}},
+            "mean_residual_demand_proxy_mw": {"current": 35877.1},
+            "mean_renewable_generation_mw": {"current": 4145.8}},
         "demand_intraday_profile": [
-            {"time_block": "00:00", "demand_mw": 39000.0,
-             "residual_demand_mw": 37000.0, "observation_count": 7},
-            {"time_block": "08:30", "demand_mw": 41000.0,
-             "residual_demand_mw": 36000.0, "observation_count": 7},
+            {"time_block": "00:00", "procurement_mw": 550.0, "demand_mw": 39000.0,
+             "residual_demand_mw": 37000.0, "renewable_generation_mw": 2000.0,
+             "observation_count": 7},
+            {"time_block": "08:30", "procurement_mw": 590.0, "demand_mw": 41000.0,
+             "residual_demand_mw": 36000.0, "renewable_generation_mw": 5000.0,
+             "observation_count": 7},
         ],
     }, "selected_week_correlations": {
         "demand_mw": {"pearson": 0.5775835870089938, "spearman": 0.46633704875086757},
         "residual_demand_proxy_mw": {"pearson": 0.5629575833976636,
-                                      "spearman": 0.45282089618210863}},
+                                      "spearman": 0.45282089618210863},
+        "renewable_generation_mw": {"pearson": -0.3123, "spearman": -0.2876}},
     }
     presentation = eprx_ai_ui.build_eprx_readable_presentation(context)
     result = {"status": "ok", "summary": "unused", "procurement_patterns": [],
@@ -347,7 +351,8 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     )
     for expected in ("572.4 MW", "504.4 MW", "68.0 MW", "13.5%", "544.0", "599.0",
                      "591.1 MW", "548.3 MW", "40,022.9 MW", "35,877.1 MW",
-                     "r = +0.58", "ρ = +0.47", "r = +0.56", "ρ = +0.45", "잔여수요"):
+                     "4,145.8 MW", "r = +0.58", "ρ = +0.47", "r = +0.56",
+                     "ρ = +0.45", "r = -0.31", "재생에너지 출력량", "잔여수요"):
         assert expected in rendered
     for forbidden in ("572.425595", "504.422619", "0.577583587", "Pearson r = +572",
                       "Pearson r = +544", "coefficient", "residual_demand_proxy_mw",
@@ -357,12 +362,16 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     assert "전력수요와 잔여수요가 높은 시간대" in rendered
     assert "중간 수준 · 같은 방향" in rendered and "인과관계를 의미하지 않습니다" in rendered
     assert "유의" not in rendered
-    assert len(target.metrics) == 4 and len(target.tables) == 2
+    assert len(target.metrics) == 5 and len(target.tables) == 2
+    assert set(target.tables[1]["변수"]) == {"전력수요", "잔여수요 추정치", "재생에너지 출력량"}
+    assert all(column in target.tables[1] for column in ("이번 주 평균", "모집량과의 관계", "해석", "데이터 출처", "값의 의미"))
     assert len(target.line_charts) == 1
     assert list(target.line_charts[0][0].index) == ["00:00", "08:30"]
+    assert list(target.line_charts[0][0].columns) == ["모집량", "전력수요", "잔여수요", "재생에너지 출력량"]
     assert "왜 잔여수요를 같이 보나요?" in rendered
     assert "실제로 사용된 전력수요의 30분 실적" in rendered
     assert "전력수요에서 태양광·풍력 발전량을 뺀 값" in rendered
+    assert "태양광·풍력 발전량을 합산한 값" in rendered
     assert "도쿄전력파워그리드(TEPCO PG)" in rendered
     assert "1차 조정력(一次調整力)만 분석" in rendered and "2차 조정력과 3차 조정력" in rendered
     assert all(term in rendered for term in ("평상시분", "이상시분", "자연체여력"))
