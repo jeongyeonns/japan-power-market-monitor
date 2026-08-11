@@ -20,7 +20,7 @@ MIN_REGRESSION_SAMPLES = 200
 MIN_BOOTSTRAP_DAYS = 7
 RUNTIME_BOOTSTRAP_ITERATIONS = 100
 MAX_BOOTSTRAP_PREDICTORS = 5
-FAST_CONTEXT_VERSION = "1"
+FAST_CONTEXT_VERSION = "2"
 FAST_PREDICTORS = (
     "demand_mw",
     "renewable_generation_mw",
@@ -201,6 +201,17 @@ def build_eprx_fast_context(
     start = start.normalize()
     selected = frame.loc[timestamps.ge(start) & timestamps.lt(start + pd.Timedelta(days=7))].copy()
     selected["procurement_volume_mw"] = pd.to_numeric(selected["procurement_volume"], errors="coerce")
+    selected["time_block"] = timestamps.loc[selected.index].dt.strftime("%H:%M")
+    intraday_profile = (
+        selected.groupby("time_block", sort=True)
+        .agg(
+            demand_mw=("area_demand_mw", "mean"),
+            residual_demand_mw=("residual_demand_proxy_mw", "mean"),
+            observation_count=("datetime_jst", "count"),
+        )
+        .reset_index()
+        .to_dict("records")
+    )
     correlations = {}
     for predictor in FAST_PREDICTORS:
         source = SOURCE_COLUMNS[predictor]
@@ -209,6 +220,7 @@ def build_eprx_fast_context(
     selected_week = {
         "week": base["week"], "procurement": base["procurement"],
         "daily_profile": base["daily_profile"], "notable_time_blocks": base["notable_time_blocks"],
+        "demand_intraday_profile": intraday_profile,
         "historical_position": base["historical_position"],
         "procurement_change": base["previous_week_comparison"].get("procurement_mean_mw"),
         "driver_changes": {key: value for key, value in base["previous_week_comparison"].items()

@@ -89,6 +89,7 @@ class RenderTarget:
         self.infos = []
         self.warnings = []
         self.captions = []
+        self.line_charts = []
         self.clicked_labels = set(clicked_labels)
 
     def button(self, label, **kwargs):
@@ -128,6 +129,9 @@ class RenderTarget:
 
     def caption(self, value, **kwargs):
         self.captions.append(value)
+
+    def line_chart(self, value, **kwargs):
+        self.line_charts.append((value, kwargs))
 
     def __getattr__(self, _name):
         return lambda *args, **kwargs: None
@@ -306,7 +310,8 @@ def test_correlation_strength_uses_plain_korean_thresholds():
 
 
 def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
-    context = {"selected_week": {
+    context = {"region": "Tokyo", "selected_week": {
+        "week": {"start": "2026-07-20", "end": "2026-07-26"},
         "procurement": {"mean": 572.4255952380952, "minimum": 544, "maximum": 599},
         "procurement_change": {"previous": 504.42261904761904, "change": 68.00297619047615,
                                "change_pct": 13.4817},
@@ -316,6 +321,12 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
         "driver_changes": {
             "mean_demand_mw": {"current": 40022.9},
             "mean_residual_demand_proxy_mw": {"current": 35877.1}},
+        "demand_intraday_profile": [
+            {"time_block": "00:00", "demand_mw": 39000.0,
+             "residual_demand_mw": 37000.0, "observation_count": 7},
+            {"time_block": "08:30", "demand_mw": 41000.0,
+             "residual_demand_mw": 36000.0, "observation_count": 7},
+        ],
     }, "selected_week_correlations": {
         "demand_mw": {"pearson": 0.5775835870089938, "spearman": 0.46633704875086757},
         "residual_demand_proxy_mw": {"pearson": 0.5629575833976636,
@@ -342,13 +353,27 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
                       "Pearson r = +544", "coefficient", "residual_demand_proxy_mw",
                       "Spearman CI ["):
         assert forbidden not in rendered
-    assert rendered.index("한눈에 보기") < rendered.index("수요·잔여수요와의 관계")
-    assert "중간 수준의 관계" in rendered and "인과관계를 의미하지 않습니다" in rendered
+    assert "한눈에 보기" not in rendered
+    assert "전력수요와 잔여수요가 높은 시간대" in rendered
+    assert "중간 수준 · 같은 방향" in rendered and "인과관계를 의미하지 않습니다" in rendered
     assert "유의" not in rendered
     assert len(target.metrics) == 4 and len(target.tables) == 2
-    assert "왜 잔여수요를 보나요?" in rendered
+    assert len(target.line_charts) == 1
+    assert list(target.line_charts[0][0].index) == ["00:00", "08:30"]
+    assert "왜 잔여수요를 같이 보나요?" in rendered
+    assert "실제로 사용된 전력수요의 30분 실적" in rendered
+    assert "전력수요에서 태양광·풍력 발전량을 뺀 값" in rendered
+    assert "도쿄전력파워그리드(TEPCO PG)" in rendered
     assert "1차 조정력(一次調整力)만 분석" in rendered and "2차 조정력과 3차 조정력" in rendered
     assert all(term in rendered for term in ("평상시분", "이상시분", "자연체여력"))
+
+
+def test_chubu_presentation_uses_chubu_grid_source():
+    presentation = eprx_ai_ui.build_eprx_readable_presentation({
+        "region": "Chubu", "selected_week": {"week": {
+            "start": "2026-07-20", "end": "2026-07-26"}},
+    })
+    assert presentation["grid_source_label"] == "중부전력파워그리드(Chubu PG)"
 
 
 def test_heavy_context_runs_only_after_enabled_button_click(monkeypatch):

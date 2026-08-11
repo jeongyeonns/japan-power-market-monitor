@@ -137,6 +137,20 @@ def test_common_statistical_context_is_json_safe(region):
     json.dumps(context, allow_nan=False)
 
 
+def test_fast_context_builds_48_slot_demand_profile_from_seven_daily_values():
+    features = _feature_history()
+    context = build_eprx_fast_context(features, "Tokyo", "2026-05-25")
+    profile = context["selected_week"]["demand_intraday_profile"]
+    assert len(profile) == 48
+    assert {row["observation_count"] for row in profile} == {7}
+    slot = next(row for row in profile if row["time_block"] == "08:30")
+    timestamps = pd.to_datetime(features["datetime_jst"])
+    expected = features.loc[
+        timestamps.dt.date >= pd.Timestamp("2026-05-25").date()
+    ].loc[timestamps.dt.strftime("%H:%M").eq("08:30"), "area_demand_mw"].mean()
+    assert slot["demand_mw"] == pytest.approx(expected)
+
+
 def test_correlation_strength_uses_non_exaggerating_thresholds():
     relation = _correlation(pd.Series(range(120)), pd.Series(range(120)) * 0.51)
     assert relation["pearson_strength"] == "very_strong"
