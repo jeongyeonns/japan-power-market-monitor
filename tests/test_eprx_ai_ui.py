@@ -44,18 +44,22 @@ def test_button_click_cache_rerun_context_change_and_regenerate():
 
 
 class RenderTarget:
-    def __init__(self):
+    def __init__(self, clicked_labels=()):
         self.buttons = []
         self.expanders = []
         self.markdowns = []
         self.writes = []
+        self.clicked_labels = set(clicked_labels)
 
     def button(self, label, **kwargs):
         self.buttons.append((label, kwargs))
-        return False
+        return label in self.clicked_labels
 
     def expander(self, label, **kwargs):
         self.expanders.append((label, kwargs))
+        return nullcontext()
+
+    def spinner(self, _label):
         return nullcontext()
 
     def markdown(self, value, **kwargs):
@@ -69,14 +73,21 @@ class RenderTarget:
 
 
 def _render(monkeypatch, *, api_key="key", local_status="ok", cached=False,
-            cached_result=None):
+            cached_result=None, clicked_labels=()):
     context = {"region": "Tokyo", "selected_week": {"week": {"market_regimes": ["modern"]}}}
     local = {"status": local_status, "message": "missing", "region": "Tokyo"}
     if local_status == "ok":
         local.update({"analysis_context": context, "join_diagnostics": {
             "matched_rows": 336, "eprx_rows": 336, "tepco_rows": 336},
             "latest_source_date": "2026-08-02", "file_fingerprint": "files"})
-    monkeypatch.setattr(eprx_ai_ui, "load_local_eprx_grid_context", lambda *args: local)
+    readiness = {"status": local_status, "ready": local_status == "ok",
+        "complete_week": local_status == "ok", "join_rate": 1.0 if local_status == "ok" else 0.0,
+        "latest_source_date": "2026-08-02", "file_fingerprint": "files", "message": "missing"}
+    heavy_calls = []
+    monkeypatch.setattr(eprx_ai_ui, "local_grid_week_fingerprint", lambda *args: {"fingerprint": "grid"})
+    monkeypatch.setattr(eprx_ai_ui, "check_eprx_ai_readiness", lambda *args: readiness)
+    monkeypatch.setattr(eprx_ai_ui, "load_local_eprx_grid_context",
+                        lambda *args: heavy_calls.append(args) or local)
     monkeypatch.setattr(eprx_ai_ui, "build_eprx_statistical_fallback", lambda _context: {})
     monkeypatch.setattr(eprx_ai_ui, "resolve_openai_settings", lambda: (api_key, "gpt-5-mini"))
     session = {}
@@ -86,7 +97,8 @@ def _render(monkeypatch, *, api_key="key", local_status="ok", cached=False,
             eprx_ai_ui.calculate_eprx_context_hash(context), "gpt-5-mini")
         session[key] = cached_result or {"status": "ok", "headline": "cached", "summary": "summary"}
     monkeypatch.setattr("streamlit.session_state", session)
-    target = RenderTarget()
+    target = RenderTarget(clicked_labels)
+    target.heavy_calls = heavy_calls
     eprx_ai_ui.render_eprx_ai_analysis_section(
         target, pd.DataFrame(), "Tokyo", pd.Timestamp("2026-07-27"))
     return target
@@ -97,7 +109,8 @@ def test_generate_button_visible_for_ready_and_cached_states(monkeypatch):
         target = _render(monkeypatch, cached=cached)
         generate = next(item for item in target.buttons if item[0] == "AI 분석 생성")
         assert generate[1]["disabled"] is False
-        assert target.expanders == [("Python 통계 요약", {"expanded": False})]
+        assert target.expanders == []
+        assert target.heavy_calls == []
 
 
 def test_generate_button_visible_but_disabled_without_key_or_data(monkeypatch):
@@ -184,3 +197,23 @@ def test_metric_formatters_are_nan_safe_and_never_use_scientific_notation():
                       eprx_ai_ui.format_correlation, eprx_ai_ui.format_number):
         assert formatter(None) == "—"
         assert formatter(float("nan")) == "—"
+
+
+def test_heavy_context_runs_only_after_enabled_button_click(monkeypatch):
+    monkeypatch.setattr(eprx_ai_ui, "run_ai_analysis_action", lambda **_kwargs: {
+        "status": "ok", "headline": "완료", "summary": "요약"})
+    before = _render(monkeypatch)
+    assert before.heavy_calls == []
+    after = _render(monkeypatch, clicked_labels={"AI 분석 생성"})
+    assert len(after.heavy_calls) == 1
+    assert after.expanders == [("Python 통계 요약", {"expanded": False})]
+
+
+def test_readiness_cache_key_changes_with_grid_or_selected_eprx_fingerprint():
+    frame = pd.DataFrame({"area": ["Tokyo"], "delivery_date": ["2026-07-20"],
+                          "period_no": [1], "period_start": ["00:00"],
+                          "procurement_volume": [572.4]})
+    first = eprx_ai_ui.make_readiness_cache_key(frame, "Tokyo", "2026-07-20", "grid-a")
+    assert first != eprx_ai_ui.make_readiness_cache_key(frame, "Tokyo", "2026-07-20", "grid-b")
+    changed = frame.copy(); changed.loc[0, "procurement_volume"] = 573.0
+    assert first != eprx_ai_ui.make_readiness_cache_key(changed, "Tokyo", "2026-07-20", "grid-a")

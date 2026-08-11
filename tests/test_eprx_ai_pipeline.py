@@ -1,9 +1,15 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from utils import eprx_ai_pipeline
-from utils.eprx_ai_pipeline import load_local_eprx_grid_context, local_grid_file_fingerprint
+from utils.eprx_ai_pipeline import (
+    check_eprx_ai_readiness,
+    load_local_eprx_grid_context,
+    local_grid_file_fingerprint,
+    local_grid_week_fingerprint,
+)
 
 
 def test_missing_local_raw_files_are_safe_for_both_regions(tmp_path):
@@ -48,3 +54,30 @@ def test_selected_week_gates_completeness_but_regression_features_use_history(tm
     assert result["status"] == "ok"
     assert calls == ["2026-07-20", None]
     assert result["analysis_context"]["history_rows"] == 1_000
+
+
+def test_lightweight_readiness_checks_complete_week_without_heavy_statistics(tmp_path, monkeypatch):
+    path = tmp_path / "eria_jukyu_202607_03.csv"; path.write_text("fixture", encoding="utf-8")
+    grid = pd.DataFrame({"source_file": [path.name], "delivery_date": [pd.Timestamp("2026-07-20")]})
+    diagnostics = pd.DataFrame([{"source_file": path.name, "status": "Loaded"}])
+    monkeypatch.setattr(eprx_ai_pipeline, "load_tepco_area_data", lambda _paths: (grid, diagnostics))
+    timestamps = pd.date_range("2026-07-20", periods=336, freq="30min")
+    merged = pd.DataFrame({"delivery_date": timestamps.normalize(),
+        "period_no": timestamps.hour * 2 + timestamps.minute // 30 + 1,
+        "period_start": timestamps.strftime("%H:%M"), "join_status": "both"})
+    monkeypatch.setattr(eprx_ai_pipeline, "join_eprx_region_with_grid", lambda *_args: (merged, {
+        "eprx_rows": 336, "tepco_rows": 336, "matched_rows": 336, "all_rows_matched": True}))
+    monkeypatch.setattr(eprx_ai_pipeline, "build_eprx_statistical_context",
+                        lambda *_args, **_kwargs: pytest.fail("heavy statistics called during readiness"))
+    result = check_eprx_ai_readiness(pd.DataFrame(), "Tokyo", "2026-07-20", tmp_path)
+    assert result["ready"] is True
+    assert result["eprx_rows"] == result["grid_rows"] == result["matched_timestamps"] == 336
+
+
+def test_readiness_missing_grid_is_false_and_week_fingerprint_changes(tmp_path):
+    missing = check_eprx_ai_readiness(pd.DataFrame(), "Tokyo", "2026-07-20", tmp_path)
+    assert missing["ready"] is False and missing["status"] == "source_data_missing"
+    path = tmp_path / "eria_jukyu_202607_03.csv"; path.write_text("x", encoding="utf-8")
+    first = local_grid_week_fingerprint("Tokyo", "2026-07-20", tmp_path)["fingerprint"]
+    path.write_text("xx", encoding="utf-8")
+    assert local_grid_week_fingerprint("Tokyo", "2026-07-20", tmp_path)["fingerprint"] != first

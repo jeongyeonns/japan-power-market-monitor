@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Callable, MutableMapping
 
 import pandas as pd
@@ -12,7 +13,11 @@ from utils.eprx_ai_analysis import (
     generate_eprx_ai_analysis,
     resolve_openai_settings,
 )
-from utils.eprx_ai_pipeline import load_local_eprx_grid_context
+from utils.eprx_ai_pipeline import (
+    check_eprx_ai_readiness,
+    load_local_eprx_grid_context,
+    local_grid_week_fingerprint,
+)
 
 
 DISPLAY_NAMES = {
@@ -140,6 +145,32 @@ def make_analysis_cache_key(region: str, week_start: Any, file_fingerprint: str,
                                    file_fingerprint, context_hash, model))
 
 
+def make_readiness_cache_key(eprx_df: pd.DataFrame, region: str, week_start: Any,
+                             grid_fingerprint: str) -> str:
+    start = pd.Timestamp(week_start).normalize(); end = start + pd.Timedelta(days=7)
+    areas = eprx_df.get("area", pd.Series(index=eprx_df.index, dtype=str))
+    selected = eprx_df.loc[areas.eq(region)].copy()
+    if "delivery_date" in selected:
+        dates = pd.to_datetime(selected["delivery_date"], errors="coerce").dt.normalize()
+        selected = selected.loc[dates.between(start, end, inclusive="left")]
+    columns = [column for column in ("delivery_date", "period_no", "period_start", "procurement_volume")
+               if column in selected]
+    hashed = pd.util.hash_pandas_object(selected[columns], index=False).to_numpy().tobytes() if columns else b""
+    eprx_fingerprint = hashlib.sha256(hashed).hexdigest()
+    return "eprx_ai_ready:" + ":".join((region, start.date().isoformat(), eprx_fingerprint,
+                                          grid_fingerprint))
+
+
+def _cached_analysis_result(session_state: MutableMapping[str, Any], region: str,
+                            week_start: Any) -> dict[str, Any] | None:
+    date = pd.Timestamp(week_start).date().isoformat()
+    prefixes = (f"eprx_ai_display:{region}:{date}:", f"eprx_ai:{region}:{date}:")
+    for key in reversed(list(session_state)):
+        if str(key).startswith(prefixes) and isinstance(session_state[key], dict):
+            return session_state[key]
+    return None
+
+
 def run_ai_analysis_action(*, context: dict[str, Any], region: str, week_start: Any,
                            file_fingerprint: str, model: str,
                            session_state: MutableMapping[str, Any], clicked: bool,
@@ -177,39 +208,46 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
     """Render without any network activity until an enabled button is clicked."""
     if region not in {"Tokyo", "Chubu"}:
         return
+    import streamlit as st
     target.divider(); target.subheader("AI 모집량 분석")
-    local = load_local_eprx_grid_context(eprx_df, region, week_start)
+    grid_fingerprint = local_grid_week_fingerprint(region, week_start)["fingerprint"]
+    readiness_key = make_readiness_cache_key(eprx_df, region, week_start, grid_fingerprint)
+    if readiness_key not in st.session_state:
+        st.session_state[readiness_key] = check_eprx_ai_readiness(eprx_df, region, week_start)
+    readiness = st.session_state[readiness_key]
     target.caption(f"선택 지역: {region} · 선택 주차: {pd.Timestamp(week_start):%Y-%m-%d}")
-    if local["status"] != "ok":
-        target.info(local["message"])
-        target.button("AI 분석 생성", disabled=True, key=f"eprx_ai_disabled_{region}_{week_start}")
-        return
-    context = local["analysis_context"]
-    join = local["join_diagnostics"]
-    rate = join["matched_rows"] / max(join["eprx_rows"], join["tepco_rows"], 1)
-    target.caption(f"계통자료 출처: {'도쿄전력 PG' if region == 'Tokyo' else '중부전력 PG'} · 최신일: {local['latest_source_date']}")
-    target.caption(f"분석 기간: {context.get('analysis_period', {}).get('start')} ~ {context.get('analysis_period', {}).get('end')} · 결합 성공률: {rate:.1%}")
-    fallback = build_eprx_statistical_fallback(context)
-    with target.expander("Python 통계 요약", expanded=False): target.json(fallback)
+    rate = float(readiness.get("join_rate", 0.0))
+    if readiness.get("latest_source_date"):
+        target.caption(f"계통자료 출처: {'도쿄전력 PG' if region == 'Tokyo' else '중부전력 PG'} · 최신일: {readiness['latest_source_date']}")
+    target.caption(f"선택 주차 결합 성공률: {rate:.1%}")
     api_key, model = resolve_openai_settings()
     state = evaluate_eprx_ai_ui_state(market="EPRX", region=region, week_start=week_start,
-        context_status=local["status"], complete_week=join["matched_rows"] == 336,
-        market_regimes=context.get("selected_week", {}).get("week", {}).get("market_regimes", ["48_block"]),
+        context_status=readiness["status"], complete_week=bool(readiness.get("complete_week")),
+        market_regimes=["modern_30minute"],
         join_success_rate=rate, api_key_available=bool(api_key))
+    if readiness["status"] != "ok":
+        target.info(readiness.get("message", "분석 가능한 완전 주차가 아닙니다."))
     if not api_key: target.info("OpenAI API 키가 설정되어 있지 않습니다. Python 통계 요약만 표시합니다.")
     clicked = target.button("AI 분석 생성", disabled=not state["ai_button_enabled"],
                             key=f"eprx_ai_generate_{region}_{pd.Timestamp(week_start).date()}")
     regenerate = target.button("다시 생성", disabled=not state["ai_button_enabled"],
                                key=f"eprx_ai_regenerate_{region}_{pd.Timestamp(week_start).date()}")
-    import streamlit as st
+    result = _cached_analysis_result(st.session_state, region, week_start)
     if clicked or regenerate:
-        with target.spinner("요약 통계를 바탕으로 분석을 생성하고 있습니다..."):
+        with target.spinner("분석 데이터를 준비하고 있습니다..."):
+            local = load_local_eprx_grid_context(eprx_df, region, week_start)
+            if local["status"] != "ok":
+                target.warning(local.get("message", "분석 context를 생성하지 못했습니다."))
+                return
+            context = local["analysis_context"]
+            fallback = build_eprx_statistical_fallback(context)
+            with target.expander("Python 통계 요약", expanded=False): target.json(fallback)
             result = run_ai_analysis_action(context=context, region=region, week_start=week_start,
                 file_fingerprint=local["file_fingerprint"], model=model, session_state=st.session_state,
                 clicked=True, regenerate=regenerate)
-    else:
-        result = run_ai_analysis_action(context=context, region=region, week_start=week_start,
-            file_fingerprint=local["file_fingerprint"], model=model, session_state=st.session_state, clicked=False)
+            display_key = (f"eprx_ai_display:{region}:{pd.Timestamp(week_start).date()}:"
+                           f"{readiness['file_fingerprint']}:{model}")
+            st.session_state[display_key] = result
     if result:
         render_eprx_ai_result(target, result)
     target.caption("본 분석은 공개된 30분 실적자료를 이용한 사후 통계분석입니다. 수요는 공개자료 기반 실적치이며 의사결정 당시 예측자료와 다를 수 있습니다. 평상시분·비상시분·수의계약량·자연체여력은 분리되어 있지 않습니다. 통계적 연관성은 인과관계를 의미하지 않으며 모집량 예측 결과가 아닙니다.")
