@@ -56,6 +56,27 @@ def test_deterministic_context_cache_reuses_and_invalidates_by_readiness_key():
     assert calls == [1, 2]
 
 
+def test_fast_history_cache_reuses_parsed_features_across_weeks(monkeypatch):
+    frame = pd.DataFrame({"area": ["Tokyo"], "delivery_date": ["2026-07-20"],
+                          "period_no": [1], "period_start": ["00:00"],
+                          "procurement_volume": [1.0]})
+    first_key = eprx_ai_ui.make_fast_context_cache_key(frame, "Tokyo", "2026-07-20", "grid")
+    second_key = eprx_ai_ui.make_fast_context_cache_key(frame, "Tokyo", "2026-07-27", "grid")
+    assert eprx_ai_ui.make_fast_history_cache_key(first_key) == eprx_ai_ui.make_fast_history_cache_key(second_key)
+    session = {}; loads = []
+    local = {"status": "ok", "feature_history": pd.DataFrame({"x": [1]}),
+             "analysis_context": {"week": "first"}}
+    first, _ = eprx_ai_ui.get_or_build_fast_local_context(
+        session, first_key, "Tokyo", "2026-07-20", lambda: loads.append(1) or local)
+    monkeypatch.setattr(eprx_ai_ui, "build_eprx_fast_context",
+                        lambda *_args: {"week": "second"})
+    second, _ = eprx_ai_ui.get_or_build_fast_local_context(
+        session, second_key, "Tokyo", "2026-07-27", lambda: loads.append(2) or local)
+    assert first["analysis_context"]["week"] == "first"
+    assert second["analysis_context"]["week"] == "second"
+    assert loads == [1]
+
+
 class RenderTarget:
     def __init__(self, clicked_labels=()):
         self.buttons = []
@@ -122,7 +143,7 @@ def test_generate_button_visible_for_ready_and_cached_states(monkeypatch):
         target = _render(monkeypatch, cached=cached)
         generate = next(item for item in target.buttons if item[0] == "AI 분석 생성")
         assert generate[1]["disabled"] is False
-        assert target.expanders == []
+        assert target.expanders == [("상세 통계 분석", {"expanded": False})]
         assert target.heavy_calls == []
 
 
@@ -166,6 +187,20 @@ def test_result_renderer_treats_interpretation_string_as_paragraph_and_formats_e
     assert "demand_mw" not in rendered
     assert "e+" not in rendered.lower()
     assert "This is retrospective" not in rendered
+
+
+def test_fast_result_renderer_is_immediate_and_formats_association():
+    target = RenderTarget()
+    eprx_ai_ui.render_eprx_ai_result(target, {
+        "status": "ok", "summary": "이번 주 요약", "procurement_patterns": ["패턴 하나"],
+        "associations": [{"metric_path": "analysis.selected_associations.0.spearman",
+            "display_name": "평균 수요", "value": 0.5686, "unit": "coefficient",
+            "interpretation": "중간 수준의 양의 관계입니다."}],
+        "cautions": ["인과관계를 의미하지 않습니다."],
+    })
+    rendered = "\n".join(target.markdowns + target.writes)
+    assert "이번 주 요약" in rendered and "패턴 하나" in rendered
+    assert "+0.57" in rendered and "인과관계" in rendered
 
 
 def test_live_streamlit_runtime_path_renders_cached_string_and_numbers(monkeypatch):
@@ -219,7 +254,7 @@ def test_heavy_context_runs_only_after_enabled_button_click(monkeypatch):
     assert before.heavy_calls == []
     after = _render(monkeypatch, clicked_labels={"AI 분석 생성"})
     assert len(after.heavy_calls) == 1
-    assert after.expanders == [("Python 통계 요약", {"expanded": False})]
+    assert after.expanders == [("상세 통계 분석", {"expanded": False})]
 
 
 def test_readiness_cache_key_changes_with_grid_or_selected_eprx_fingerprint():

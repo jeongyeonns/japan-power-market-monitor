@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+from functools import lru_cache
 from datetime import date, datetime
 from typing import Any
 
@@ -15,12 +16,16 @@ import pandas as pd
 
 DEFAULT_MODEL = "gpt-5-mini"
 MAX_INPUT_CHARACTERS = 30000
-EPRX_AI_MAX_OUTPUT_TOKENS = 3000
+EPRX_AI_MAX_OUTPUT_TOKENS = 2000
 EPRX_AI_REASONING_EFFORT = "minimal"
 EPRX_AI_VERBOSITY = "low"
 EVIDENCE_REL_TOLERANCE = 0.02
 EVIDENCE_ABS_TOLERANCE = 0.005
 PAYLOAD_VERSION = "1.0"
+FAST_REQUIRED_RESPONSE_FIELDS = (
+    "status", "region", "week_start", "summary", "procurement_patterns",
+    "associations", "cautions", "context_hash",
+)
 REQUIRED_RESPONSE_FIELDS = ("status", "region", "week_start", "headline", "summary",
     "confirmed_findings", "statistical_interpretation", "association_candidates",
     "counter_evidence", "profile_warning", "data_quality_notes", "limitations",
@@ -76,62 +81,40 @@ def build_eprx_ai_payload(analysis_context: dict[str, Any]) -> dict[str, Any]:
     validation = validate_eprx_ai_context(analysis_context)
     if not validation["valid"]: raise ValueError("Invalid EPRX context: " + ", ".join(validation["errors"]))
     selected = analysis_context["selected_week"]
-    def compact_correlations(source: dict[str, Any] | None, limit: int) -> dict[str, Any]:
-        rows = []
-        for name, relation in (source or {}).items():
-            score = relation.get("spearman")
-            if score is None: continue
-            rows.append((abs(score), name, {key: relation.get(key) for key in
-                ("status", "sample_count", "pearson", "spearman", "pearson_direction",
-                 "pearson_strength", "spearman_direction", "spearman_strength")}))
-        rows.sort(key=lambda row: (-row[0], row[1]))
-        return {name: values for _, name, values in rows[:limit]}
-
-    adjusted = compact_correlations(analysis_context.get("time_adjusted_correlations"), 5)
-    bootstrap = {}
-    for name in adjusted:
-        interval = analysis_context.get("bootstrap_intervals", {}).get(name, {}).get("anomaly_spearman")
-        if interval:
-            bootstrap[name] = {"anomaly_spearman": {key: interval.get(key) for key in
-                ("estimate", "ci_95_lower", "ci_95_upper", "bootstrap_iterations_valid", "status")}}
-    regressions = [{key: model.get(key) for key in ("model_name", "status", "sample_count",
-                    "r_squared", "adjusted_r_squared", "standardized_coefficients", "warnings")}
-                   for model in analysis_context.get("regression_models", [])]
-    quality = {key: value for key, value in analysis_context.get("data_quality", {}).items()
-               if not isinstance(value, (dict, list))}
+    display_names = {
+        "demand_mw": "평균 수요", "renewable_generation_mw": "재생에너지 발전량",
+        "renewable_share_pct": "재생에너지 비율", "residual_demand_proxy_mw": "잔여수요 추정치",
+        "abs_renewable_ramp_30m_mw": "재생에너지 30분 변동폭",
+        "abs_solar_ramp_30m_mw": "태양광 30분 변동폭",
+        "abs_demand_ramp_30m_mw": "수요 30분 변동폭",
+    }
+    associations = []
+    for name, relation in (analysis_context.get("selected_week_correlations") or
+                           analysis_context.get("time_adjusted_correlations") or {}).items():
+        score = relation.get("spearman")
+        if score is None:
+            continue
+        associations.append({"variable": name, "display_name": display_names.get(name, name),
+            **{key: relation.get(key) for key in ("sample_count", "pearson", "spearman",
+                "spearman_direction", "spearman_strength")}})
+    associations.sort(key=lambda item: (-abs(item["spearman"]), item["variable"]))
     notable = selected.get("notable_time_blocks") or {}
     notable = {"highest": notable.get("highest", [])[:3], "lowest": notable.get("lowest", [])[:3]}
     repetition = analysis_context.get("profile_repetition") or {}
-    repetition = {key: repetition.get(key) for key in ("status", "complete_week_count",
-        "weeks_identical_to_previous_count", "unique_weekly_profile_count") if key in repetition}
+    quality = analysis_context.get("data_quality") or {}
     payload = _json_safe({
         "region": analysis_context["region"], "week": selected["week"],
-        "analysis_period": analysis_context.get("analysis_period"),
-        "procurement": selected.get("procurement"),
-        "daily_profile": selected.get("daily_profile"),
-        "notable_time_blocks": notable,
+        "procurement_summary": selected.get("procurement"),
+        "previous_week_comparison": selected.get("procurement_change"),
         "historical_position": selected.get("historical_position"),
-        "procurement_change": selected.get("procurement_change"),
-        "driver_changes": selected.get("driver_changes"),
-        "raw_correlations": compact_correlations(analysis_context.get("raw_correlations"), 3),
-        "time_adjusted_correlations": adjusted,
-        "bootstrap_intervals": bootstrap,
-        "regression_models": regressions,
-        "association_candidates": selected.get("association_candidates"),
-        "profile_repetition": repetition,
-        "data_quality": quality, "warnings": list(dict.fromkeys(analysis_context.get("warnings", []))),
-        "limitations": list(dict.fromkeys(analysis_context.get("limitations", [])))[:3],
+        "intraday_profile_summary": notable,
+        "profile_repetition": {key: repetition.get(key) for key in
+            ("same_as_previous_week", "maximum_absolute_difference_mw", "unique_weekly_profile_count")},
+        "selected_associations": associations[:5],
+        "data_quality_summary": {key: quality.get(key) for key in
+            ("expected_weekly_rows", "actual_rows", "duplicate_datetime_rows", "missing_procurement_count")},
+        "limitations": list(dict.fromkeys(analysis_context.get("limitations", [])))[:2],
     })
-    if selected.get("co_movement_comparison"):
-        comparison = selected["co_movement_comparison"]
-        candidate_names = [item.get("variable") for item in
-                           (selected.get("association_candidates") or {}).get("items", [])[:3]]
-        payload["co_movement_comparison"] = _json_safe({"status": comparison.get("status"),
-            "quantile_tie_warning": comparison.get("quantile_tie_warning"),
-            "variables": {name: {key: comparison.get("variables", {}).get(name, {}).get(key)
-                for key in ("high_group_count", "low_group_count", "high_group_mean",
-                            "low_group_mean", "mean_difference", "mean_difference_pct")}
-                for name in candidate_names if name in comparison.get("variables", {})}})
     payload, excluded = _trim_payload(payload)
     text = json.dumps(payload, ensure_ascii=False, allow_nan=False)
     if len(text) > MAX_INPUT_CHARACTERS: raise ValueError("AI payload exceeds the configured character limit")
@@ -176,9 +159,12 @@ def validate_eprx_ai_response(response_data: dict[str, Any], *, expected_region:
     errors = []
     diagnostics: dict[str, Any] = {}
     if not isinstance(response_data, dict): return {"valid": False, "errors": ["response_must_be_object"]}
-    for field in REQUIRED_RESPONSE_FIELDS:
+    fast_response = isinstance(response_data, dict) and "procurement_patterns" in response_data
+    required_fields = FAST_REQUIRED_RESPONSE_FIELDS if fast_response else REQUIRED_RESPONSE_FIELDS
+    for field in required_fields:
         if field not in response_data: errors.append(f"missing_{field}")
-    list_fields = ("confirmed_findings", "association_candidates", "counter_evidence", "data_quality_notes", "limitations")
+    list_fields = (("procurement_patterns", "associations", "cautions") if fast_response else
+                   ("confirmed_findings", "association_candidates", "counter_evidence", "data_quality_notes", "limitations"))
     for field in list_fields:
         if field in response_data and not isinstance(response_data[field], list): errors.append(f"invalid_type_{field}")
     for field in ("headline", "summary", "statistical_interpretation", "profile_warning", "conclusion", "disclaimer"):
@@ -188,7 +174,8 @@ def validate_eprx_ai_response(response_data: dict[str, Any], *, expected_region:
     if expected_context_hash and response_data.get("context_hash") != expected_context_hash: errors.append("context_hash_mismatch")
     evidence_errors = []
     if input_payload is not None:
-        for field in ("confirmed_findings", "association_candidates"):
+        evidence_fields = ("associations",) if fast_response else ("confirmed_findings", "association_candidates")
+        for field in evidence_fields:
             for index, evidence in enumerate(response_data.get(field, [])):
                 issue = _validate_evidence(evidence, input_payload)
                 if issue:
@@ -196,12 +183,6 @@ def validate_eprx_ai_response(response_data: dict[str, Any], *, expected_region:
         if evidence_errors:
             errors.append("invalid_structured_evidence")
             diagnostics["evidence_errors"] = evidence_errors
-        narrative_fields = ("headline", "summary", "statistical_interpretation", "counter_evidence",
-                            "profile_warning", "data_quality_notes", "limitations", "conclusion", "disclaimer")
-        diagnostics["narrative_numeric_literal_count"] = sum(
-            len(re.findall(r"(?<![A-Za-z0-9_])-?\d+(?:\.\d+)?", json.dumps(response_data.get(field), ensure_ascii=False)))
-            for field in narrative_fields
-        )
     return {"valid": not errors, "errors": errors,
             "diagnostics": diagnostics,
             "numeric_validation_scope": "schema and identity fields only; free-text numeric provenance cannot be proven reliably"}
@@ -214,6 +195,7 @@ def _schema() -> dict[str, Any]:
     return {"type": "object", "properties": properties, "required": list(REQUIRED_RESPONSE_FIELDS), "additionalProperties": False}
 
 
+@lru_cache(maxsize=1)
 def _response_model():
     """Create the Pydantic schema lazily so non-AI imports remain safe."""
     from pydantic import ConfigDict, create_model
@@ -221,13 +203,10 @@ def _response_model():
     Evidence = create_model("EprxEvidence", __config__=ConfigDict(extra="forbid", strict=True),
         metric_path=(str, ...), display_name=(str, ...), value=(float, ...),
         unit=(str, ...), interpretation=(str, ...))
-    return create_model("EprxAiResponse", __config__=ConfigDict(extra="forbid", strict=True),
-        status=(str, ...), region=(str, ...), week_start=(str, ...), headline=(str, ...),
-        summary=(str, ...), confirmed_findings=(list[Evidence], ...),
-        statistical_interpretation=(str, ...), association_candidates=(list[Evidence], ...),
-        counter_evidence=(list[str], ...), profile_warning=(str, ...),
-        data_quality_notes=(list[str], ...), limitations=(list[str], ...),
-        conclusion=(str, ...), disclaimer=(str, ...), context_hash=(str, ...))
+    return create_model("FastEprxAiResponse", __config__=ConfigDict(extra="forbid", strict=True),
+        status=(str, ...), region=(str, ...), week_start=(str, ...), summary=(str, ...),
+        procurement_patterns=(list[str], ...), associations=(list[Evidence], ...),
+        cautions=(list[str], ...), context_hash=(str, ...))
 
 
 def _resolve_metric_path(payload: dict[str, Any], path: str) -> Any:
@@ -411,33 +390,20 @@ def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | N
         client = _client_factory(api_key=key, max_retries=0)
     except (ImportError, ModuleNotFoundError) as exc:
         return {"status": "dependency_missing", "message": str(exc), "fallback": fallback}
-    instructions = ("일본 전력시장과 EPRX 1차 조정력 주간 데이터를 검토하는 전력시장 분석가로서 한국어로 작성하라. "
-        "전력시장 실무자가 30초 안에 읽을 수 있게 이번 주 모집량 자체의 평균·범위·전주 대비 변화·시간대 패턴을 먼저 설명하고, "
-        "그다음 역사적 위치와 수요·재생에너지·잔여수요의 관계를 설명하라. raw correlation보다 시간대 조정 상관, "
-        "Pearson·Spearman 방향 일치, bootstrap 구간, association relevance, leave-one-out 및 상·하위 모집량 비교를 우선하라. "
-        "비슷한 파생변수나 같은 태양광 변수군을 중복 나열하지 말고 시장 해석에 유용한 관계만 최대 3개 고르라. "
-        "제공된 계산값만 사용하고 상관관계를 영향이나 인과로 표현하지 말라. 실제 유의성 검정 결과가 없으므로 '유의', "
-        "'유의한 영향', '통계적으로 유의'라는 표현을 사용하지 말라. 미래 모집량, 비공개 구성비, 자연체여력 또는 "
-        "수의계약량을 추정하지 말라. 내부 영문 변수명은 쓰지 말고 자연스러운 한국어 지표명을 사용하라. "
-        "수요는 공개 30분 실적이고 의사결정 당시 예측자료와 다를 수 있음을 명시하라.")
     request_payload = {"expected_response_metadata": {"context_hash": context_hash, "model": selected_model},
                        "domain_constants": {"product": "1차 조정력", "interval_minutes": 30,
                                             "periods_per_day": 48, "days_per_week": 7,
                                             "expected_complete_week_rows": 336},
                        "analysis": built["payload"]}
     request_payload["metric_catalog"] = _numeric_metric_catalog(request_payload)
-    instructions += (" 정량적 근거는 metric_catalog에 있는 metric_path, value, unit을 그대로 사용해 "
-        "confirmed_findings와 association_candidates에 기록하라. 새로운 계산값을 만들지 말고, "
-        "각 evidence는 metric_path, display_name, value, unit, interpretation 5개 필드를 모두 포함하고 value는 숫자여야 한다. "
-        "정량 근거가 없는 설명은 evidence 배열이 아니라 자유서술 필드에 기록하라. statistical_interpretation은 하나의 문자열이다. "
-        "headline은 1문장, summary는 최대 2문장이며 모집량 특징부터 시작하라. confirmed_findings는 최대 3개이며 모집량 패턴만 담고, "
-        "statistical_interpretation은 이번 주 핵심 해석을 최대 2문장, association_candidates는 서로 다른 변수군의 계통 연관성만 최대 3개, "
-        "counter_evidence는 통계적 주의점만 최대 3개로 작성하라. 정상 데이터의 data_quality_notes는 '336/336, 결합률 100%' 수준의 1개 문장으로 제한하라. "
-        "profile_warning은 최대 2문장, limitations는 현재 분석에 중요한 한국어 문장 최대 3개, conclusion은 최대 2문장, disclaimer는 1문장으로 작성하라. "
-        "동일 내용을 여러 필드에서 반복하지 말고 숫자 근거는 evidence에서 한 번만 제시하며 summary에서 모두 재나열하지 말라. "
-        "상관계수는 단위가 없으며 coefficient나 %를 단위처럼 설명하지 말라. 자유서술에서는 불필요하게 숫자를 반복하지 말라. "
-        "|r| 0.4 이상 0.6 미만은 중간 수준, 0.6 이상 0.8 미만은 강한 관계로 표현하라. 표시 반올림은 근거 value와 의미가 같게 제한하라.")
-    request_text = json.dumps(request_payload, ensure_ascii=False)
+    instructions = (
+        "일본 EPRX 1차 조정력 주간 데이터를 해석하는 전력시장 분석가로서 한국어로 답하세요. "
+        "이번 주 핵심을 2~3문장으로 요약하고, 모집량 패턴은 최대 3개, 계통 변수 연관성은 최대 3개, "
+        "주의점은 최대 2개로 작성하세요. 상관계수를 나열하거나 같은 계열 변수를 반복하지 말고, "
+        "인과관계로 표현하지 마세요. 유의성 검정을 하지 않았으므로 '유의'라는 표현을 쓰지 마세요. "
+        "정량 evidence는 metric_catalog의 metric_path와 값을 그대로 사용하세요."
+    )
+    request_text = json.dumps(request_payload, ensure_ascii=False, separators=(",", ":"))
     request_diagnostics = {"model": selected_model, "max_output_tokens": EPRX_AI_MAX_OUTPUT_TOKENS,
         "reasoning_effort": EPRX_AI_REASONING_EFFORT, "verbosity": EPRX_AI_VERBOSITY,
         "input_character_count": len(request_text)}

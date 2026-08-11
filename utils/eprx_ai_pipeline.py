@@ -11,7 +11,11 @@ import pandas as pd
 
 from utils.chuden_area_loader import load_chuden_area_data
 from utils.eprx_driver_features import build_eprx_driver_features
-from utils.eprx_driver_statistics import RUNTIME_BOOTSTRAP_ITERATIONS, build_eprx_statistical_context
+from utils.eprx_driver_statistics import (
+    RUNTIME_BOOTSTRAP_ITERATIONS,
+    build_eprx_fast_context,
+    build_eprx_statistical_context,
+)
 from utils.tepco_area_loader import join_eprx_region_with_grid, load_tepco_area_data
 
 RAW_DIRECTORIES = {
@@ -136,8 +140,7 @@ def load_local_eprx_grid_context(
             len(selected_merged) == 336
             and join_diagnostics.get("all_rows_matched") is True
         )
-        # Completeness is a selected-week gate, but weekday/time-block anomalies and
-        # regressions require the full locally available history as their baseline.
+        # Keep one feature history so the opt-in detailed analysis can reuse it.
         historical_merged, _ = join_eprx_region_with_grid(eprx_df, grid_df, region)
         features, feature_diagnostics = build_eprx_driver_features(historical_merged)
         if not complete:
@@ -145,14 +148,24 @@ def load_local_eprx_grid_context(
                     "region": region, "file_fingerprint": fingerprint["fingerprint"],
                     "source_files": sorted(accepted), "file_diagnostics": safe_diagnostics,
                     "join_diagnostics": join_diagnostics, "feature_diagnostics": feature_diagnostics}
-        context = build_eprx_statistical_context(features, region, week_start,
-                                                 bootstrap_iterations=bootstrap_iterations)
+        context = build_eprx_fast_context(features, region, week_start)
         return {"status": "ok", "message": "분석 컨텍스트를 생성했습니다.", "region": region,
                 "file_fingerprint": fingerprint["fingerprint"], "source_files": sorted(accepted),
                 "latest_source_date": str(pd.to_datetime(grid_df["delivery_date"]).max().date()),
                 "file_diagnostics": safe_diagnostics, "join_diagnostics": join_diagnostics,
-                "feature_diagnostics": feature_diagnostics, "analysis_context": context}
+                "feature_diagnostics": feature_diagnostics, "analysis_context": context,
+                "feature_history": features}
     except (KeyError, TypeError, ValueError) as exc:
         return {"status": "analysis_unavailable", "message": str(exc), "region": region,
                 "file_fingerprint": fingerprint["fingerprint"], "source_files": sorted(accepted),
                 "file_diagnostics": safe_diagnostics}
+
+
+def build_detailed_context(local_context: dict[str, Any], region: str, week_start: Any,
+                           bootstrap_iterations: int = RUNTIME_BOOTSTRAP_ITERATIONS) -> dict[str, Any]:
+    """Build opt-in heavy statistics from already parsed and joined feature history."""
+    features = local_context.get("feature_history")
+    if not isinstance(features, pd.DataFrame):
+        raise ValueError("feature_history_missing")
+    return build_eprx_statistical_context(
+        features, region, week_start, bootstrap_iterations=bootstrap_iterations)

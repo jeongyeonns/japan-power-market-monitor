@@ -13,6 +13,7 @@ from utils.eprx_driver_statistics import (
     add_leave_one_out_anomalies,
     analyze_eprx_driver_statistics,
     block_bootstrap_interval,
+    build_eprx_fast_context,
     build_eprx_statistical_context,
     co_movement_comparison,
     fit_standardized_model,
@@ -172,6 +173,18 @@ def test_context_build_runs_base_statistics_and_regressions_once(monkeypatch):
         _feature_history(), "Tokyo", "2026-05-25", bootstrap_iterations=2)
     assert context["regression_models"]
     assert calls == {"base": 1, "statistics": 1}
+
+
+def test_fast_context_skips_anomaly_bootstrap_and_regression(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("heavy statistics must not run in the FAST path")
+    monkeypatch.setattr(statistics_module, "add_leave_one_out_anomalies", forbidden)
+    monkeypatch.setattr(statistics_module, "calculate_bootstrap_intervals", forbidden)
+    monkeypatch.setattr(statistics_module, "_regression_models", forbidden)
+    context = build_eprx_fast_context(_feature_history(), "Tokyo", "2026-05-25")
+    assert context["analysis_mode"] == "fast"
+    assert len(context["selected_week_correlations"]) == 7
+    assert context["selected_week"]["procurement"]["valid_count"] == 336
 
 
 def test_candidate_score_range_and_zero_crossing_ci_is_weak_evidence():

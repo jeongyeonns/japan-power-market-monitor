@@ -30,7 +30,7 @@ def test_fingerprint_uses_name_size_and_mtime_without_absolute_path(tmp_path):
     assert local_grid_file_fingerprint("Tokyo", tmp_path)["fingerprint"] != first
 
 
-def test_selected_week_gates_completeness_but_regression_features_use_history(tmp_path, monkeypatch):
+def test_selected_week_gates_completeness_and_fast_context_uses_history(tmp_path, monkeypatch):
     (tmp_path / "month.csv").write_text("fixture", encoding="utf-8")
     grid = pd.DataFrame({"source_file": ["month.csv"], "delivery_date": [pd.Timestamp("2026-07-31")]})
     diagnostics = pd.DataFrame([{"source_file": "month.csv", "status": "Loaded"}])
@@ -48,7 +48,7 @@ def test_selected_week_gates_completeness_but_regression_features_use_history(tm
     monkeypatch.setattr(eprx_ai_pipeline, "join_eprx_region_with_grid", fake_join)
     monkeypatch.setattr(eprx_ai_pipeline, "build_eprx_driver_features",
                         lambda frame: (frame, {"feature_input_rows": len(frame)}))
-    monkeypatch.setattr(eprx_ai_pipeline, "build_eprx_statistical_context",
+    monkeypatch.setattr(eprx_ai_pipeline, "build_eprx_fast_context",
                         lambda frame, *_args, **_kwargs: {"history_rows": len(frame)})
     result = load_local_eprx_grid_context(pd.DataFrame(), "Tokyo", "2026-07-20", tmp_path)
     assert result["status"] == "ok"

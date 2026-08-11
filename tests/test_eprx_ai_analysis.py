@@ -26,14 +26,11 @@ def context():
 
 
 def response_for(ctx, model="gpt-5-mini"):
-    return {"status": "ok", "region": "Tokyo", "week_start": "2026-03-14", "headline": "요약",
-        "summary": "통계 요약", "confirmed_findings": [{"metric_path": "analysis.time_adjusted_correlations.demand_mw.spearman",
-            "display_name": "수요 조정 상관", "value": 0.2, "unit": "coefficient", "interpretation": "약한 양의 관계"}],
-        "statistical_interpretation": "통계적 연관성은 인과관계를 의미하지 않는다.",
-        "association_candidates": [{"metric_path": "analysis.time_adjusted_correlations.demand_mw.spearman",
-            "display_name": "수요", "value": 0.2, "unit": "coefficient", "interpretation": "관계 후보"}],
-        "counter_evidence": [], "profile_warning": "주의",
-        "data_quality_notes": [], "limitations": [], "conclusion": "결론", "disclaimer": "비예측",
+    return {"status": "ok", "region": "Tokyo", "week_start": "2026-03-14",
+        "summary": "통계 요약", "procurement_patterns": ["주간 패턴"],
+        "associations": [{"metric_path": "analysis.selected_associations.0.spearman",
+            "display_name": "수요", "value": 0.2, "unit": "coefficient", "interpretation": "약한 양의 관계"}],
+        "cautions": ["인과관계를 의미하지 않는다."],
         "context_hash": calculate_eprx_context_hash(ctx)}
 
 
@@ -90,8 +87,7 @@ def test_payload_limits_relation_detail_to_runtime_evidence_set():
     }
     ctx["raw_correlations"] = ctx["time_adjusted_correlations"]
     built = build_eprx_ai_payload(ctx)["payload"]
-    assert len(built["time_adjusted_correlations"]) == 5
-    assert len(built["raw_correlations"]) == 3
+    assert len(built["selected_associations"]) == 5
 
 
 def test_invalid_context_never_calls_client():
@@ -106,12 +102,11 @@ def test_structured_response_validation_and_single_call():
     result = generate_eprx_ai_analysis(ctx, api_key="fake-test-key", _client_factory=lambda **kw: client)
     assert result["status"] == "ok" and responses.calls == 1
     assert "text_format" in responses.request
-    assert responses.request["max_output_tokens"] == 3000
+    assert responses.request["max_output_tokens"] == 2000
     assert responses.request["reasoning"] == {"effort": "minimal"}
     assert responses.request["text"] == {"verbosity": "low"}
     assert "verbosity" not in responses.request
-    assert "confirmed_findings는 최대 3개" in responses.request["instructions"]
-    assert "summary는 최대 2문장" in responses.request["instructions"]
+    assert "모집량 패턴은 최대 3개" in responses.request["instructions"]
     assert result["request_diagnostics"]["reasoning_effort"] == "minimal"
     assert result["response_diagnostics"]["structured_parsed_present"] is True
     assert "input" not in result and "output_text" not in result
@@ -119,25 +114,24 @@ def test_structured_response_validation_and_single_call():
 
 def test_pydantic_schema_accepts_structured_evidence():
     parsed = ai_module._response_model().model_validate(response_for(context()))
-    assert parsed.confirmed_findings[0].metric_path.endswith("spearman")
+    assert parsed.associations[0].metric_path.endswith("spearman")
 
 
 def test_pydantic_schema_json_empty_multiple_and_numeric_edges():
     model = ai_module._response_model(); data = response_for(context())
-    data["confirmed_findings"] = []
-    data["association_candidates"] = []
-    assert model.model_validate_json(json.dumps(data)).confirmed_findings == []
-    data["confirmed_findings"] = [evidence("metric.zero", 0.0, "unitless"),
+    data["associations"] = []
+    assert model.model_validate_json(json.dumps(data)).associations == []
+    data["associations"] = [evidence("metric.zero", 0.0, "unitless"),
                                    evidence("metric.negative", -0.35)]
     parsed = model.model_validate(data)
-    assert [item.value for item in parsed.confirmed_findings] == [0.0, -0.35]
+    assert [item.value for item in parsed.associations] == [0.0, -0.35]
 
 
 def test_pydantic_schema_rejects_missing_string_value_and_extra_field():
     model = ai_module._response_model()
-    missing = response_for(context()); missing.pop("headline")
+    missing = response_for(context()); missing.pop("summary")
     with pytest.raises(Exception): model.model_validate(missing)
-    string_value = response_for(context()); string_value["confirmed_findings"][0]["value"] = "0.2"
+    string_value = response_for(context()); string_value["associations"][0]["value"] = "0.2"
     with pytest.raises(Exception): model.model_validate(string_value)
     extra = response_for(context()); extra["unexpected"] = "no"
     with pytest.raises(Exception): model.model_validate(extra)
@@ -145,7 +139,7 @@ def test_pydantic_schema_rejects_missing_string_value_and_extra_field():
 
 def test_pydantic_validation_diagnostics_exclude_input_values():
     model = ai_module._response_model(); data = response_for(context())
-    data["confirmed_findings"][0]["value"] = "not-a-number"
+    data["associations"][0]["value"] = "not-a-number"
     try:
         model.model_validate(data)
     except Exception as exc:
@@ -208,18 +202,18 @@ def evidence(path, value, unit="coefficient"):
 def test_free_text_domain_numbers_do_not_reject_response():
     ctx = context(); data = response_for(ctx)
     data["summary"] = "2026-07-27 주차의 1차 조정력 30분 자료로 48코마·336행을 확인했다."
-    data["limitations"] = ["상위 20%와 하위 20%, 95% 신뢰구간은 인과를 뜻하지 않는다."]
+    data["cautions"] = ["상위 20%와 하위 20%, 95% 신뢰구간은 인과를 뜻하지 않는다."]
     payload = {"analysis": build_eprx_ai_payload(ctx)["payload"]}
     checked = validate_eprx_ai_response(data, input_payload=payload)
     assert checked["valid"]
-    assert checked["diagnostics"]["narrative_numeric_literal_count"] > 0
+    assert "narrative_numeric_literal_count" not in checked["diagnostics"]
 
 
 def test_structured_evidence_path_value_rounding_negative_and_percentage():
     ctx = context(); data = response_for(ctx)
     payload = {"metric": {"correlation": {"spearman": -0.347812}, "change_pct": 2.386}}
-    data["confirmed_findings"] = [evidence("metric.correlation.spearman", -0.35)]
-    data["association_candidates"] = [evidence("metric.change_pct", 2.4, "%")]
+    data["associations"] = [evidence("metric.correlation.spearman", -0.35),
+                            evidence("metric.change_pct", 2.4, "%")]
     assert validate_eprx_ai_response(data, input_payload=payload)["valid"]
 
 
@@ -227,7 +221,7 @@ def test_structured_evidence_missing_path_and_wrong_value_are_rejected():
     ctx = context(); payload = {"metric": {"correlation": {"spearman": 0.347812}}}
     for item, reason in ((evidence("metric.missing", 0.35), "metric_path_not_found"),
                          (evidence("metric.correlation.spearman", 0.8), "evidence_value_mismatch")):
-        data = response_for(ctx); data["confirmed_findings"] = [item]; data["association_candidates"] = [item]
+        data = response_for(ctx); data["associations"] = [item]
         checked = validate_eprx_ai_response(data, input_payload=payload)
         assert not checked["valid"] and "invalid_structured_evidence" in checked["errors"]
         assert checked["diagnostics"]["evidence_errors"][0]["reason"] == reason

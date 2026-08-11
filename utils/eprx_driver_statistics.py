@@ -20,6 +20,16 @@ MIN_REGRESSION_SAMPLES = 200
 MIN_BOOTSTRAP_DAYS = 7
 RUNTIME_BOOTSTRAP_ITERATIONS = 100
 MAX_BOOTSTRAP_PREDICTORS = 5
+FAST_CONTEXT_VERSION = "1"
+FAST_PREDICTORS = (
+    "demand_mw",
+    "renewable_generation_mw",
+    "renewable_share_pct",
+    "residual_demand_proxy_mw",
+    "abs_renewable_ramp_30m_mw",
+    "abs_solar_ramp_30m_mw",
+    "abs_demand_ramp_30m_mw",
+)
 
 SOURCE_COLUMNS = {
     "procurement_volume_mw": "procurement_volume",
@@ -171,6 +181,52 @@ def calculate_correlations(data: pd.DataFrame, anomaly: bool = False) -> dict[st
             continue
         output[predictor] = _correlation(data[target], data[variable])
     return output
+
+
+def build_eprx_fast_context(
+    feature_df: pd.DataFrame, region: str, week_start: Any,
+) -> dict[str, Any]:
+    """Build the default AI context without anomaly, bootstrap, or regression work."""
+    base = build_eprx_analysis_context(feature_df, region, week_start)
+    frame = _region_filter(feature_df, region)
+    if not set(FEATURE_COLUMNS).issubset(frame.columns):
+        frame, _ = build_eprx_driver_features(frame)
+    timestamps = pd.to_datetime(frame["datetime_jst"], errors="coerce")
+    if timestamps.dt.tz is None:
+        timestamps = timestamps.dt.tz_localize("Asia/Tokyo")
+    else:
+        timestamps = timestamps.dt.tz_convert("Asia/Tokyo")
+    start = pd.Timestamp(week_start)
+    start = start.tz_localize("Asia/Tokyo") if start.tzinfo is None else start.tz_convert("Asia/Tokyo")
+    start = start.normalize()
+    selected = frame.loc[timestamps.ge(start) & timestamps.lt(start + pd.Timedelta(days=7))].copy()
+    selected["procurement_volume_mw"] = pd.to_numeric(selected["procurement_volume"], errors="coerce")
+    correlations = {}
+    for predictor in FAST_PREDICTORS:
+        source = SOURCE_COLUMNS[predictor]
+        correlations[predictor] = _correlation(
+            selected["procurement_volume_mw"], pd.to_numeric(selected[source], errors="coerce"), minimum=2)
+    selected_week = {
+        "week": base["week"], "procurement": base["procurement"],
+        "daily_profile": base["daily_profile"], "notable_time_blocks": base["notable_time_blocks"],
+        "historical_position": base["historical_position"],
+        "procurement_change": base["previous_week_comparison"].get("procurement_mean_mw"),
+        "driver_changes": {key: value for key, value in base["previous_week_comparison"].items()
+                           if not key.startswith("procurement_")},
+    }
+    return to_json_safe({
+        "analysis_type": "eprx_fast_weekly_association", "analysis_mode": "fast",
+        "fast_context_version": FAST_CONTEXT_VERSION, "status": base["status"], "region": region,
+        "selected_week": selected_week, "selected_week_correlations": correlations,
+        # Compatibility alias for the fallback renderer; these are unadjusted selected-week associations.
+        "time_adjusted_correlations": correlations,
+        "profile_repetition": base["profile_repetition"], "data_quality": base["data_quality"],
+        "limitations": [
+            "This is retrospective statistical association analysis using public 30-minute actuals.",
+            "Actual demand and renewable output may differ from forecasts available when EPRX procurement was decided.",
+            "Residual demand is a proxy calculated from public data.",
+        ],
+    })
 
 
 def _complete_dates(data: pd.DataFrame) -> list[pd.Timestamp]:
