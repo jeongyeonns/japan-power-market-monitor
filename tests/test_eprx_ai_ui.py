@@ -43,6 +43,19 @@ def test_button_click_cache_rerun_context_change_and_regenerate():
     run_ai_analysis_action(clicked=True, regenerate=True, **kwargs); assert calls == [1, 2, 1]
 
 
+def test_deterministic_context_cache_reuses_and_invalidates_by_readiness_key():
+    calls = []
+    session = {}
+    builder = lambda: calls.append(len(calls) + 1) or {"build": len(calls)}
+    first, first_hit = eprx_ai_ui.get_or_build_analysis_context(session, "source-a", builder)
+    second, second_hit = eprx_ai_ui.get_or_build_analysis_context(session, "source-a", builder)
+    changed, changed_hit = eprx_ai_ui.get_or_build_analysis_context(session, "source-b", builder)
+    assert (first, first_hit) == ({"build": 1}, False)
+    assert (second, second_hit) == ({"build": 1}, True)
+    assert (changed, changed_hit) == ({"build": 2}, False)
+    assert calls == [1, 2]
+
+
 class RenderTarget:
     def __init__(self, clicked_labels=()):
         self.buttons = []

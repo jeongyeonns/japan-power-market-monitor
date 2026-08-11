@@ -11,7 +11,7 @@ import pandas as pd
 
 from utils.chuden_area_loader import load_chuden_area_data
 from utils.eprx_driver_features import build_eprx_driver_features
-from utils.eprx_driver_statistics import build_eprx_statistical_context
+from utils.eprx_driver_statistics import RUNTIME_BOOTSTRAP_ITERATIONS, build_eprx_statistical_context
 from utils.tepco_area_loader import join_eprx_region_with_grid, load_tepco_area_data
 
 RAW_DIRECTORIES = {
@@ -108,7 +108,8 @@ def check_eprx_ai_readiness(eprx_df: pd.DataFrame, region: str, week_start: Any,
 
 def load_local_eprx_grid_context(
     eprx_df: pd.DataFrame, region: str, week_start: Any,
-    base_directory: Path | None = None, bootstrap_iterations: int = 500,
+    base_directory: Path | None = None,
+    bootstrap_iterations: int = RUNTIME_BOOTSTRAP_ITERATIONS,
 ) -> dict[str, Any]:
     """Read manually placed files; never downloads or mutates a source file."""
     fingerprint = local_grid_file_fingerprint(region, base_directory)

@@ -18,6 +18,8 @@ from utils.eprx_driver_features import FEATURE_COLUMNS, build_eprx_driver_featur
 MIN_CORRELATION_SAMPLES = 100
 MIN_REGRESSION_SAMPLES = 200
 MIN_BOOTSTRAP_DAYS = 7
+RUNTIME_BOOTSTRAP_ITERATIONS = 100
+MAX_BOOTSTRAP_PREDICTORS = 5
 
 SOURCE_COLUMNS = {
     "procurement_volume_mw": "procurement_volume",
@@ -189,13 +191,21 @@ def block_bootstrap_interval(
     if len(dates) < MIN_BOOTSTRAP_DAYS:
         return {**base, "status": "unavailable", "reason": "fewer_than_7_complete_dates"}
     rng = np.random.default_rng(random_seed); results = []
-    groups = {date: group for date, group in data.loc[data["analysis_date"].isin(dates)].groupby("analysis_date")}
+    pairs = data.loc[data["analysis_date"].isin(dates), ["analysis_date", target, variable]].dropna()
+    groups = {date: group[[target, variable]].to_numpy(dtype=float, copy=False)
+              for date, group in pairs.groupby("analysis_date", sort=False)}
+    dates = [date for date in dates if date in groups]
+    if len(dates) < MIN_BOOTSTRAP_DAYS:
+        return {**base, "status": "unavailable", "reason": "fewer_than_7_complete_dates"}
     for _ in range(iterations):
         sampled = rng.choice(len(dates), size=len(dates), replace=True)
-        sample = pd.concat([groups[dates[index]] for index in sampled], ignore_index=True)
-        relation = _correlation(sample[target], sample[variable], minimum=2)
-        if relation["spearman"] is not None:
-            results.append(relation["spearman"])
+        sample = np.concatenate([groups[dates[index]] for index in sampled])
+        if len(sample) >= 2 and np.unique(sample[:, 0]).size >= 2 and np.unique(sample[:, 1]).size >= 2:
+            target_ranks = pd.Series(sample[:, 0], copy=False).rank(method="average").to_numpy()
+            variable_ranks = pd.Series(sample[:, 1], copy=False).rank(method="average").to_numpy()
+            value = np.corrcoef(target_ranks, variable_ranks)[0, 1]
+            if np.isfinite(value):
+                results.append(float(value))
     base["bootstrap_iterations_valid"] = len(results)
     if len(results) < iterations * 0.5:
         return {**base, "status": "unavailable", "reason": "fewer_than_half_iterations_valid"}
@@ -208,17 +218,17 @@ def calculate_bootstrap_intervals(
     iterations: int, random_seed: int,
 ) -> dict[str, Any]:
     output = {}
-    for predictor in PREDICTORS:
+    ranked = sorted(
+        (predictor for predictor in PREDICTORS if adjusted.get(predictor, {}).get("spearman") is not None
+         and ANOMALY_BY_PREDICTOR.get(predictor)),
+        key=lambda predictor: (-abs(adjusted[predictor]["spearman"]), predictor),
+    )[:MAX_BOOTSTRAP_PREDICTORS]
+    for predictor in ranked:
         anomaly_variable = ANOMALY_BY_PREDICTOR.get(predictor)
         output[predictor] = {
-            "raw_spearman": block_bootstrap_interval(data, "procurement_volume_mw", predictor,
-                raw.get(predictor, {}).get("spearman"), iterations, random_seed),
             "anomaly_spearman": block_bootstrap_interval(data, "procurement_anomaly_mw", anomaly_variable,
                 adjusted.get(predictor, {}).get("spearman"), iterations, random_seed)
-                if anomaly_variable else {"estimate": None, "ci_95_lower": None, "ci_95_upper": None,
-                    "bootstrap_unit": "date", "bootstrap_iterations_requested": iterations,
-                    "bootstrap_iterations_valid": 0, "random_seed": random_seed,
-                    "status": "unavailable", "reason": "no_requested_anomaly_variable"},
+                if anomaly_variable else None,
         }
     return output
 
@@ -381,7 +391,9 @@ def _association_candidates(base: dict[str, Any], statistics: dict[str, Any]) ->
 
 
 def analyze_eprx_selected_week_statistics(
-    feature_df: pd.DataFrame, region: str, week_start: Any, historical_statistics: dict[str, Any] | None = None,
+    feature_df: pd.DataFrame, region: str, week_start: Any,
+    historical_statistics: dict[str, Any] | None = None,
+    base_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     statistics = historical_statistics or analyze_eprx_driver_statistics(feature_df, region)
     prepared, _ = prepare_statistics_data(feature_df, region)
@@ -389,7 +401,7 @@ def analyze_eprx_selected_week_statistics(
     start = start.tz_localize("Asia/Tokyo") if start.tzinfo is None else start.tz_convert("Asia/Tokyo")
     end = start.normalize() + pd.Timedelta(days=7)
     selected = prepared.loc[prepared["datetime_jst"].ge(start.normalize()) & prepared["datetime_jst"].lt(end)]
-    base = build_eprx_analysis_context(feature_df, region, week_start)
+    base = base_context or build_eprx_analysis_context(feature_df, region, week_start)
     return to_json_safe({"week": base["week"],
         "procurement": base["procurement"],
         "daily_profile": base["daily_profile"],
@@ -403,12 +415,13 @@ def analyze_eprx_selected_week_statistics(
 
 def build_eprx_statistical_context(
     feature_df: pd.DataFrame, region: str, week_start: Any, analysis_start: Any = None,
-    analysis_end: Any = None, bootstrap_iterations: int = 500, random_seed: int = 42,
+    analysis_end: Any = None, bootstrap_iterations: int = RUNTIME_BOOTSTRAP_ITERATIONS,
+    random_seed: int = 42,
 ) -> dict[str, Any]:
+    base = build_eprx_analysis_context(feature_df, region, week_start)
     statistics = analyze_eprx_driver_statistics(feature_df, region, analysis_start, analysis_end,
         bootstrap_iterations, random_seed)
-    selected = analyze_eprx_selected_week_statistics(feature_df, region, week_start, statistics)
-    base = build_eprx_analysis_context(feature_df, region, week_start)
+    selected = analyze_eprx_selected_week_statistics(feature_df, region, week_start, statistics, base)
     repetition = base["profile_repetition"]
     warnings = list(statistics["warnings"])
     complete = repetition.get("complete_week_count", 0); repeated = repetition.get("weeks_identical_to_previous_count", 0)

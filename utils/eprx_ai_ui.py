@@ -46,6 +46,7 @@ LIMITATION_TRANSLATIONS = {
     "Thirty-minute data cannot reproduce sub-second primary reserve variation.":
         "30분 자료로는 1차 조정력이 대응하는 초단주기 변동을 직접 재현할 수 없습니다.",
 }
+STATISTICS_ALGORITHM_VERSION = "3"
 
 
 def _finite_number(value: Any) -> float | None:
@@ -171,6 +172,16 @@ def _cached_analysis_result(session_state: MutableMapping[str, Any], region: str
     return None
 
 
+def get_or_build_analysis_context(session_state: MutableMapping[str, Any], readiness_key: str,
+                                  builder: Callable[[], dict[str, Any]]) -> tuple[dict[str, Any], bool]:
+    key = f"eprx_ai_context:{STATISTICS_ALGORITHM_VERSION}:{readiness_key}"
+    if key in session_state:
+        return session_state[key], True
+    context = builder()
+    session_state[key] = context
+    return context, False
+
+
 def run_ai_analysis_action(*, context: dict[str, Any], region: str, week_start: Any,
                            file_fingerprint: str, model: str,
                            session_state: MutableMapping[str, Any], clicked: bool,
@@ -234,14 +245,16 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
                                key=f"eprx_ai_regenerate_{region}_{pd.Timestamp(week_start).date()}")
     result = _cached_analysis_result(st.session_state, region, week_start)
     if clicked or regenerate:
-        with target.spinner("분석 데이터를 준비하고 있습니다..."):
-            local = load_local_eprx_grid_context(eprx_df, region, week_start)
+        with target.spinner("데이터 요약과 통계 관계를 계산하고 있습니다..."):
+            local, _ = get_or_build_analysis_context(st.session_state, readiness_key,
+                lambda: load_local_eprx_grid_context(eprx_df, region, week_start))
             if local["status"] != "ok":
                 target.warning(local.get("message", "분석 context를 생성하지 못했습니다."))
                 return
             context = local["analysis_context"]
             fallback = build_eprx_statistical_fallback(context)
             with target.expander("Python 통계 요약", expanded=False): target.json(fallback)
+        with target.spinner("AI 분석을 생성하고 있습니다..."):
             result = run_ai_analysis_action(context=context, region=region, week_start=week_start,
                 file_fingerprint=local["file_fingerprint"], model=model, session_state=st.session_state,
                 clicked=True, regenerate=regenerate)

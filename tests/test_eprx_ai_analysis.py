@@ -82,6 +82,18 @@ def test_payload_is_bounded_json_safe_and_reproducible():
     assert "co_movement_comparison" not in built["payload"]
 
 
+def test_payload_limits_relation_detail_to_runtime_evidence_set():
+    ctx = context()
+    ctx["time_adjusted_correlations"] = {
+        f"driver_{index}": {"spearman": index / 10, "sample_count": 336}
+        for index in range(10)
+    }
+    ctx["raw_correlations"] = ctx["time_adjusted_correlations"]
+    built = build_eprx_ai_payload(ctx)["payload"]
+    assert len(built["time_adjusted_correlations"]) == 5
+    assert len(built["raw_correlations"]) == 3
+
+
 def test_invalid_context_never_calls_client():
     called = []
     result = generate_eprx_ai_analysis({}, api_key="fake-test-key", _client_factory=lambda **kw: called.append(kw))
@@ -94,7 +106,7 @@ def test_structured_response_validation_and_single_call():
     result = generate_eprx_ai_analysis(ctx, api_key="fake-test-key", _client_factory=lambda **kw: client)
     assert result["status"] == "ok" and responses.calls == 1
     assert "text_format" in responses.request
-    assert responses.request["max_output_tokens"] == 10000
+    assert responses.request["max_output_tokens"] == 3000
     assert responses.request["reasoning"] == {"effort": "minimal"}
     assert responses.request["text"] == {"verbosity": "low"}
     assert "verbosity" not in responses.request
@@ -221,7 +233,7 @@ def test_structured_evidence_missing_path_and_wrong_value_are_rejected():
         assert checked["diagnostics"]["evidence_errors"][0]["reason"] == reason
 
 
-def test_transient_error_retries_once_and_auth_does_not():
+def test_api_errors_do_not_trigger_implicit_second_request():
     ctx = context()
     class TemporaryError(Exception): pass
     class AuthenticationError(Exception): pass
@@ -230,7 +242,7 @@ def test_transient_error_retries_once_and_auth_does_not():
         def parse(self, **kwargs): self.calls += 1; raise self.error()
     temporary = Responses(TemporaryError)
     generate_eprx_ai_analysis(ctx, api_key="fake-test-key", _client_factory=lambda **kw: type("C", (), {"responses": temporary})())
-    assert temporary.calls == 2
+    assert temporary.calls == 1
     auth = Responses(AuthenticationError)
     generate_eprx_ai_analysis(ctx, api_key="fake-test-key", _client_factory=lambda **kw: type("C", (), {"responses": auth})())
     assert auth.calls == 1

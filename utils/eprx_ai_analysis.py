@@ -15,7 +15,7 @@ import pandas as pd
 
 DEFAULT_MODEL = "gpt-5-mini"
 MAX_INPUT_CHARACTERS = 30000
-EPRX_AI_MAX_OUTPUT_TOKENS = 10000
+EPRX_AI_MAX_OUTPUT_TOKENS = 3000
 EPRX_AI_REASONING_EFFORT = "minimal"
 EPRX_AI_VERBOSITY = "low"
 EVIDENCE_REL_TOLERANCE = 0.02
@@ -76,7 +76,7 @@ def build_eprx_ai_payload(analysis_context: dict[str, Any]) -> dict[str, Any]:
     validation = validate_eprx_ai_context(analysis_context)
     if not validation["valid"]: raise ValueError("Invalid EPRX context: " + ", ".join(validation["errors"]))
     selected = analysis_context["selected_week"]
-    def compact_correlations(source: dict[str, Any] | None) -> dict[str, Any]:
+    def compact_correlations(source: dict[str, Any] | None, limit: int) -> dict[str, Any]:
         rows = []
         for name, relation in (source or {}).items():
             score = relation.get("spearman")
@@ -85,36 +85,53 @@ def build_eprx_ai_payload(analysis_context: dict[str, Any]) -> dict[str, Any]:
                 ("status", "sample_count", "pearson", "spearman", "pearson_direction",
                  "pearson_strength", "spearman_direction", "spearman_strength")}))
         rows.sort(key=lambda row: (-row[0], row[1]))
-        return {name: values for _, name, values in rows[:8]}
+        return {name: values for _, name, values in rows[:limit]}
 
-    adjusted = compact_correlations(analysis_context.get("time_adjusted_correlations"))
-    bootstrap = {name: analysis_context.get("bootstrap_intervals", {}).get(name)
-                 for name in adjusted if name in analysis_context.get("bootstrap_intervals", {})}
+    adjusted = compact_correlations(analysis_context.get("time_adjusted_correlations"), 5)
+    bootstrap = {}
+    for name in adjusted:
+        interval = analysis_context.get("bootstrap_intervals", {}).get(name, {}).get("anomaly_spearman")
+        if interval:
+            bootstrap[name] = {"anomaly_spearman": {key: interval.get(key) for key in
+                ("estimate", "ci_95_lower", "ci_95_upper", "bootstrap_iterations_valid", "status")}}
     regressions = [{key: model.get(key) for key in ("model_name", "status", "sample_count",
                     "r_squared", "adjusted_r_squared", "standardized_coefficients", "warnings")}
                    for model in analysis_context.get("regression_models", [])]
     quality = {key: value for key, value in analysis_context.get("data_quality", {}).items()
                if not isinstance(value, (dict, list))}
+    notable = selected.get("notable_time_blocks") or {}
+    notable = {"highest": notable.get("highest", [])[:3], "lowest": notable.get("lowest", [])[:3]}
+    repetition = analysis_context.get("profile_repetition") or {}
+    repetition = {key: repetition.get(key) for key in ("status", "complete_week_count",
+        "weeks_identical_to_previous_count", "unique_weekly_profile_count") if key in repetition}
     payload = _json_safe({
         "region": analysis_context["region"], "week": selected["week"],
         "analysis_period": analysis_context.get("analysis_period"),
         "procurement": selected.get("procurement"),
         "daily_profile": selected.get("daily_profile"),
-        "notable_time_blocks": selected.get("notable_time_blocks"),
+        "notable_time_blocks": notable,
         "historical_position": selected.get("historical_position"),
         "procurement_change": selected.get("procurement_change"),
         "driver_changes": selected.get("driver_changes"),
-        "raw_correlations": compact_correlations(analysis_context.get("raw_correlations")),
+        "raw_correlations": compact_correlations(analysis_context.get("raw_correlations"), 3),
         "time_adjusted_correlations": adjusted,
         "bootstrap_intervals": bootstrap,
         "regression_models": regressions,
         "association_candidates": selected.get("association_candidates"),
-        "profile_repetition": analysis_context.get("profile_repetition"),
+        "profile_repetition": repetition,
         "data_quality": quality, "warnings": list(dict.fromkeys(analysis_context.get("warnings", []))),
-        "limitations": list(dict.fromkeys(analysis_context.get("limitations", []))),
+        "limitations": list(dict.fromkeys(analysis_context.get("limitations", [])))[:3],
     })
     if selected.get("co_movement_comparison"):
-        payload["co_movement_comparison"] = _json_safe(selected["co_movement_comparison"])
+        comparison = selected["co_movement_comparison"]
+        candidate_names = [item.get("variable") for item in
+                           (selected.get("association_candidates") or {}).get("items", [])[:3]]
+        payload["co_movement_comparison"] = _json_safe({"status": comparison.get("status"),
+            "quantile_tie_warning": comparison.get("quantile_tie_warning"),
+            "variables": {name: {key: comparison.get("variables", {}).get(name, {}).get(key)
+                for key in ("high_group_count", "low_group_count", "high_group_mean",
+                            "low_group_mean", "mean_difference", "mean_difference_pct")}
+                for name in candidate_names if name in comparison.get("variables", {})}})
     payload, excluded = _trim_payload(payload)
     text = json.dumps(payload, ensure_ascii=False, allow_nan=False)
     if len(text) > MAX_INPUT_CHARACTERS: raise ValueError("AI payload exceeds the configured character limit")
@@ -265,7 +282,7 @@ def _validate_evidence(evidence: Any, payload: dict[str, Any]) -> dict[str, Any]
     return None
 
 
-def _numeric_metric_catalog(payload: dict[str, Any], limit: int = 180) -> list[dict[str, Any]]:
+def _numeric_metric_catalog(payload: dict[str, Any], limit: int = 100) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     def visit(value: Any, path: str) -> None:
         if len(output) >= limit: return
@@ -377,7 +394,7 @@ def _known_unsupported_model(model: str) -> bool:
 
 def generate_eprx_ai_analysis(analysis_context: dict[str, Any], api_key: str | None = None,
                               model: str | None = None, _client_factory=None,
-                              _max_attempts: int = 2) -> dict[str, Any]:
+                              _max_attempts: int = 1) -> dict[str, Any]:
     validation = validate_eprx_ai_context(analysis_context)
     fallback = build_eprx_statistical_fallback(analysis_context) if validation["valid"] else None
     if not validation["valid"]: return {"status": "invalid_context", "errors": validation["errors"]}

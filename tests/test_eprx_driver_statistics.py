@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+import utils.eprx_driver_statistics as statistics_module
 
 from utils.eprx_driver_features import build_eprx_driver_features
 from utils.eprx_driver_statistics import (
@@ -150,6 +151,27 @@ def test_no_material_procurement_change_suppresses_candidates():
     features.loc[selected, "procurement_volume"] = profile
     context = build_eprx_statistical_context(features, "Tokyo", "2026-05-25", bootstrap_iterations=6)
     assert context["selected_week"]["association_candidates"]["status"] == "no_material_procurement_change"
+
+
+def test_context_build_runs_base_statistics_and_regressions_once(monkeypatch):
+    calls = {"base": 0, "statistics": 0}
+    original_base = statistics_module.build_eprx_analysis_context
+    original_statistics = statistics_module.analyze_eprx_driver_statistics
+
+    def counted_base(*args, **kwargs):
+        calls["base"] += 1
+        return original_base(*args, **kwargs)
+
+    def counted_statistics(*args, **kwargs):
+        calls["statistics"] += 1
+        return original_statistics(*args, **kwargs)
+
+    monkeypatch.setattr(statistics_module, "build_eprx_analysis_context", counted_base)
+    monkeypatch.setattr(statistics_module, "analyze_eprx_driver_statistics", counted_statistics)
+    context = build_eprx_statistical_context(
+        _feature_history(), "Tokyo", "2026-05-25", bootstrap_iterations=2)
+    assert context["regression_models"]
+    assert calls == {"base": 1, "statistics": 1}
 
 
 def test_candidate_score_range_and_zero_crossing_ci_is_weak_evidence():
