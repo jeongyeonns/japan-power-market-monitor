@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 
 import pandas as pd
+import pytest
 
 from utils import eprx_ai_ui
 from utils.eprx_ai_ui import evaluate_eprx_ai_ui_state, run_ai_analysis_action
@@ -314,6 +315,15 @@ def test_correlation_strength_uses_plain_korean_thresholds():
     assert eprx_ai_ui.correlation_strength(0.80) == "매우 강한 관계"
 
 
+@pytest.mark.parametrize(("procurement", "volatility", "expected"), [
+    (13.5, 12.6, "same"), (-8.0, -12.0, "same"),
+    (10.0, -8.0, "opposite"), (-10.0, 8.0, "opposite"),
+    (0.5, 8.0, "undetermined"), (None, 8.0, "undetermined"),
+])
+def test_weekly_direction_classification(procurement, volatility, expected):
+    assert eprx_ai_ui.classify_weekly_direction(procurement, volatility) == expected
+
+
 def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     context = {"region": "Tokyo", "selected_week": {
         "week": {"start": "2026-07-20", "end": "2026-07-26"},
@@ -330,7 +340,8 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
                 "mean_solar_mw": {"current": 3900.0},
                 "mean_wind_mw": {"current": 245.8},
                 "mean_renewable_share_pct": {"current": 9.0114},
-                "mean_abs_residual_demand_ramp_30m_mw": {"current": 772.1, "previous": 685.6},
+                    "mean_abs_residual_demand_ramp_30m_mw": {"current": 772.1, "previous": 685.6,
+                                                               "change_pct": 12.6169743291},
                 "mean_abs_demand_ramp_30m_mw": {"current": 640.0, "previous": 600.0},
                 "mean_abs_renewable_ramp_30m_mw": {"current": 310.0, "previous": 280.0},
                 "p95_abs_residual_demand_ramp_30m_mw": {"current": 1240.0}},
@@ -376,6 +387,11 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     assert "분석 기준 — 먼저 읽어주세요" in rendered
     assert "날씨 → 전력수요 · 태양광 · 풍력 → 잔여수요 → 잔여수요의 짧은 주기 변동 → 1차 조정력 평상시분" in rendered
     assert "공식 필요량을 재현한 값이 아닙니다" in rendered
+    assert "모집량과 잔여수요 변동이 같은 방향으로 움직였습니다" in rendered
+    assert "모집량  504.4 MW → 572.4 MW  ↑ +13.5%" in rendered
+    assert "잔여수요 변동  685.6 MW → 772.1 MW  ↑ +12.6%" in rendered
+    assert "연속된 30분 구간 사이에서 평균 772.1 MW" in rendered
+    assert all(forbidden not in rendered for forbidden in ("잔여수요가 모집량을 증가", "잔여수요가 모집량을 결정", "잔여수요 변동 때문에"))
     assert "중간 수준 · 같은 방향" in rendered and "모집량의 공식 산정 원인을 의미하지 않습니다" in rendered
     assert "유의" not in rendered
     assert len(target.metrics) == 4 and len(target.tables) == 4
@@ -392,6 +408,9 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     basis_index = next(i for i, event in enumerate(target.events) if event[0] == "info" and "분석 기준" in event[1])
     metric_index = next(i for i, event in enumerate(target.events) if event[0] == "metric")
     assert basis_index < metric_index
+    conclusion_index = next(i for i, event in enumerate(target.events) if event[0] == "markdown" and event[1] == "### 이번 주 결론")
+    background_index = next(i for i, event in enumerate(target.events) if event[0] == "markdown" and event[1] == "### 잔여수요 변동의 배경")
+    assert metric_index < conclusion_index < background_index
 
 
 def test_chubu_presentation_uses_chubu_grid_source():

@@ -150,6 +150,66 @@ def _relationship_label(relation: dict[str, Any]) -> str:
             f"(r = {format_correlation(pearson)}, ρ = {format_correlation(spearman)})")
 
 
+DIRECTION_CHANGE_THRESHOLD_PCT = 1.0
+
+
+def classify_weekly_direction(procurement_change_pct: Any,
+                              residual_volatility_change_pct: Any) -> str:
+    """Classify week-over-week directions without implying causality."""
+    procurement = _finite_number(procurement_change_pct)
+    volatility = _finite_number(residual_volatility_change_pct)
+    if procurement is None or volatility is None:
+        return "undetermined"
+    if (abs(procurement) < DIRECTION_CHANGE_THRESHOLD_PCT
+            or abs(volatility) < DIRECTION_CHANGE_THRESHOLD_PCT):
+        return "undetermined"
+    return "same" if (procurement > 0) == (volatility > 0) else "opposite"
+
+
+def _direction_symbol(value: Any) -> str:
+    number = _finite_number(value)
+    if number is None or abs(number) < DIRECTION_CHANGE_THRESHOLD_PCT:
+        return "→"
+    return "↑" if number > 0 else "↓"
+
+
+def _build_direction_conclusion(procurement: dict[str, Any], comparison: dict[str, Any],
+                                volatility: dict[str, Any], historical: dict[str, Any]) -> dict[str, str]:
+    procurement_pct = comparison.get("change_pct")
+    volatility_pct = volatility.get("change_pct")
+    status = classify_weekly_direction(procurement_pct, volatility_pct)
+    labels = {
+        "same": ("🟢 모집량과 잔여수요 변동이 같은 방향으로 움직였습니다.", "● 같은 방향"),
+        "opposite": ("🟠 모집량과 잔여수요 변동은 서로 다른 방향으로 움직였습니다.", "● 다른 방향"),
+        "undetermined": ("⚪ 이번 주에는 두 지표의 방향 관계를 뚜렷하게 판단하기 어렵습니다.", "● 뚜렷한 방향 없음"),
+    }
+    headline, badge = labels[status]
+    current_volatility = volatility.get("current")
+    previous_volatility = volatility.get("previous")
+    percentile = _finite_number((historical or {}).get("percentile"))
+    history_text = f" 최근 관측주 중 상위 {100 - percentile:.0f}% 수준입니다." if percentile is not None else ""
+    if status == "same":
+        interpretation = "공개자료 기준으로 두 지표가 같은 방향의 움직임을 보였습니다."
+    elif status == "opposite":
+        interpretation = ("공개 30분 잔여수요 변동만으로는 이번 주 모집량의 변화 방향을 설명하기 어렵습니다. "
+                          "평상시분 외 요인의 가능성은 생각할 수 있지만 공개자료만으로 확인할 수 없습니다.")
+    else:
+        interpretation = "비교값이 없거나 한쪽 변화가 작아 방향 일치 여부를 무리하게 판정하지 않았습니다."
+    return {
+        "status": status, "headline": headline, "badge": badge,
+        "procurement_line": (f"모집량  {format_mw(comparison.get('previous'))} → {format_mw(procurement.get('mean'))}  "
+                             f"{_direction_symbol(procurement_pct)} {_signed_percent(procurement_pct)}"),
+        "volatility_line": (f"잔여수요 변동  {format_mw(previous_volatility)} → {format_mw(current_volatility)}  "
+                            f"{_direction_symbol(volatility_pct)} {_signed_percent(volatility_pct)}"),
+        "absolute_text": (f"이번 주 잔여수요는 연속된 30분 구간 사이에서 평균 {format_mw(current_volatility)} 움직였습니다."
+                          f"{history_text}"),
+        "interpretation": interpretation,
+        "comparison_line": (f"모집량 변화: {_signed_percent(procurement_pct)} {_direction_symbol(procurement_pct)} / "
+                            f"잔여수요 변동: {_signed_percent(volatility_pct)} {_direction_symbol(volatility_pct)} → {badge.removeprefix('● ')}"),
+        "caution": "※ 이는 전주 대비 방향 일치를 의미하며 인과관계나 모집량의 공식 산정 원인을 의미하지 않습니다.",
+    }
+
+
 def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
     selected = context.get("selected_week", {}); procurement = selected.get("procurement", {})
     comparison = selected.get("procurement_change", {}) or {}
@@ -182,6 +242,8 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
     volatility_percentile = _finite_number(volatility_history.get("percentile"))
     volatility_delta_label = (f"최근 분포 상위 {100 - volatility_percentile:.0f}%" if volatility_percentile is not None
                               else f"전주 {format_mw(volatility_change.get('previous'))}")
+    direction_conclusion = _build_direction_conclusion(
+        procurement, comparison, volatility_change, volatility_history)
     direction = "증가" if (_finite_number(change) or 0) >= 0 else "감소"
     procurement_lines = [
         f"평균 모집량은 {format_mw(mean)}로, 전주 {format_mw(previous)}보다 {format_mw(abs(_finite_number(change) or 0))} {direction}했습니다.",
@@ -269,6 +331,7 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
         "procurement_table": procurement_table, "procurement_changes": procurement_lines,
         "comparison_table": comparison_table, "relationship_intro": relationship_intro, "relationship_table": relationship_table,
         "detail_table": detail_table,
+        "direction_conclusion": direction_conclusion,
         "volatility_detail": (f"이번 주 Δ잔여수요 표준편차 {format_mw(volatility_std_change.get('current'))} / "
                               f"최대 |Δ잔여수요| {format_mw(volatility_max_change.get('current'))}"),
         "demand_intraday_profile": profile,
@@ -369,6 +432,20 @@ def _render_analysis_basis(target) -> None:
     )
     target.caption("※ 본 화면의 잔여수요 변동은 30분 공개자료로 계산한 보조지표입니다. 공식 1차 조정력 평상시분은 이보다 훨씬 짧은 주기의 잔여수요 데이터를 이용하므로, 아래 값은 공식 필요량을 재현한 값이 아닙니다.")
     target.caption("※ 아래 분석은 모집량 변화의 원인을 확정하는 분석이 아니라, 공개자료에서 관찰되는 계통 변동 특성을 모집량과 함께 살펴보는 분석입니다.")
+
+
+def _render_direction_conclusion(target, conclusion: dict[str, str]) -> None:
+    if not conclusion: return
+    target.markdown("### 이번 주 결론")
+    target.info(
+        f"**{conclusion.get('headline', '')}**\n\n"
+        f"{conclusion.get('procurement_line', '')}\n\n"
+        f"{conclusion.get('volatility_line', '')}\n\n"
+        f"**{conclusion.get('badge', '')}**\n\n"
+        f"{conclusion.get('absolute_text', '')}\n\n"
+        f"{conclusion.get('interpretation', '')}"
+    )
+    target.caption(conclusion.get("caution", ""))
 
 
 def _render_demand_guidance(target, presentation: dict[str, Any]) -> None:
@@ -510,7 +587,10 @@ def render_eprx_ai_result(target, result: dict[str, Any]) -> None:
     if result.get("status") == "ok" and isinstance(presentation, dict):
         _render_analysis_basis(target)
         _render_summary_cards(target, presentation.get("summary_cards", []))
+        _render_direction_conclusion(target, presentation.get("direction_conclusion", {}))
         target.markdown("### 잔여수요 변동의 배경")
+        target.caption("잔여수요는 전력수요와 재생에너지 출력의 차이로 만들어집니다. 아래 표는 잔여수요 변동과 그 배경이 되는 수요·재생에너지 변동 수준을 보여줍니다.")
+        target.markdown(f"**{presentation.get('direction_conclusion', {}).get('comparison_line', '')}**")
         target.table(pd.DataFrame(presentation.get("comparison_table", [])))
         target.markdown("### 시간대별 잔여수요 변동")
         _render_intraday_demand_profile(target, presentation.get("demand_intraday_profile", []))
@@ -521,7 +601,7 @@ def render_eprx_ai_result(target, result: dict[str, Any]) -> None:
             _render_level_profile(target, presentation.get("demand_intraday_profile", []))
             _render_demand_guidance(target, presentation)
         with target.expander("현재 수급실적과 모집량의 시간대 관계", expanded=False):
-            target.caption("이 비교는 현재 주의 수급실적과 모집량이 시간대별로 함께 움직였는지를 보는 참고 분석이며, 모집량의 공식 산정 원인을 의미하지 않습니다.")
+            target.caption("아래 상관계수 분석은 위의 전주 대비 방향 비교와 별개의 분석입니다. 현재 주의 수급실적과 모집량이 시간대별로 함께 움직였는지를 보는 참고 분석이며, 모집량의 공식 산정 원인을 의미하지 않습니다.")
             _render_relationship_table(target, presentation.get("relationship_table", []))
         with target.expander("모집량 상세", expanded=False):
             target.table(pd.DataFrame(presentation.get("procurement_table", [])))
