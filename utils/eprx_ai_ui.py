@@ -53,6 +53,7 @@ LIMITATION_TRANSLATIONS = {
         "30분 자료로는 1차 조정력이 대응하는 초단주기 변동을 직접 재현할 수 없습니다.",
 }
 STATISTICS_ALGORITHM_VERSION = "3"
+PRESENTATION_VERSION = "dual-axis-raw-mw-v1"
 
 
 def _finite_number(value: Any) -> float | None:
@@ -356,6 +357,7 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
     profile = selected.get("demand_intraday_profile", []) or []
     observations = sum(int(row.get("observation_count") or 0) for row in profile)
     return {"summary_cards": cards,
+        "presentation_version": PRESENTATION_VERSION,
         "procurement_table": procurement_table, "procurement_changes": procurement_lines,
         "comparison_table": comparison_table, "relationship_intro": relationship_intro, "relationship_table": relationship_table,
         "detail_table": detail_table,
@@ -623,10 +625,15 @@ def get_or_build_fast_local_context(session_state: MutableMapping[str, Any], con
 def _cached_analysis_result(session_state: MutableMapping[str, Any], region: str,
                             week_start: Any) -> dict[str, Any] | None:
     date = pd.Timestamp(week_start).date().isoformat()
-    prefixes = (f"eprx_ai_display:{region}:{date}:", f"eprx_ai:{region}:{date}:")
+    prefixes = (f"eprx_ai_display:{PRESENTATION_VERSION}:{region}:{date}:",
+                f"eprx_ai:{region}:{date}:")
     for key in reversed(list(session_state)):
         if str(key).startswith(prefixes) and isinstance(session_state[key], dict):
-            return session_state[key]
+            result = session_state[key]
+            presentation = result.get("presentation")
+            if presentation is None or (isinstance(presentation, dict)
+                    and presentation.get("presentation_version") == PRESENTATION_VERSION):
+                return result
     return None
 
 
@@ -647,7 +654,13 @@ def run_ai_analysis_action(*, context: dict[str, Any], region: str, week_start: 
                            generator: Callable[..., dict[str, Any]] = generate_eprx_ai_analysis) -> dict[str, Any] | None:
     key = make_analysis_cache_key(region, week_start, file_fingerprint,
                                   calculate_eprx_context_hash(context), model)
-    if key in session_state and not regenerate: return session_state[key]
+    if key in session_state and not regenerate:
+        cached = session_state[key]
+        presentation = cached.get("presentation") if isinstance(cached, dict) else None
+        if not isinstance(presentation, dict) or presentation.get("presentation_version") != PRESENTATION_VERSION:
+            cached = {**cached, "presentation": build_eprx_readable_presentation(context)}
+            session_state[key] = cached
+        return cached
     if not clicked: return None
     result = generator(context, model=model)
     if result.get("status") == "ok":
@@ -764,7 +777,7 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
                 clicked=True, regenerate=regenerate)
             timings["generation_seconds"] = time.perf_counter() - generation_started
             cache_started = time.perf_counter()
-            display_key = (f"eprx_ai_display:{region}:{pd.Timestamp(week_start).date()}:"
+            display_key = (f"eprx_ai_display:{PRESENTATION_VERSION}:{region}:{pd.Timestamp(week_start).date()}:"
                            f"{readiness['file_fingerprint']}:{model}")
             st.session_state[display_key] = result
             timings["cache_seconds"] = time.perf_counter() - cache_started

@@ -191,6 +191,36 @@ def test_generate_button_visible_for_ready_and_cached_states(monkeypatch):
         assert target.heavy_calls == []
 
 
+def test_runtime_cache_rejects_legacy_normalized_presentation():
+    legacy = {"status": "ok", "presentation": {"intraday_tendency": {
+        "profile": [{"procurement_index": 100, "residual_volatility_index": 100}]}}}
+    current = {"status": "ok", "presentation": {
+        "presentation_version": eprx_ai_ui.PRESENTATION_VERSION}}
+    session = {
+        "eprx_ai_display:Tokyo:2026-07-20:old": legacy,
+        f"eprx_ai_display:{eprx_ai_ui.PRESENTATION_VERSION}:Tokyo:2026-07-20:new": current,
+    }
+    assert eprx_ai_ui._cached_analysis_result(session, "Tokyo", "2026-07-20") is current
+    session.pop(next(key for key in session if eprx_ai_ui.PRESENTATION_VERSION in key))
+    assert eprx_ai_ui._cached_analysis_result(session, "Tokyo", "2026-07-20") is None
+
+
+def test_cached_ai_result_upgrades_runtime_presentation_without_api(monkeypatch):
+    context = {"region": "Tokyo", "selected_week": {"procurement": {}, "driver_changes": {}}}
+    key = eprx_ai_ui.make_analysis_cache_key(
+        "Tokyo", "2026-07-20", "files",
+        eprx_ai_ui.calculate_eprx_context_hash(context), "model")
+    session = {key: {"status": "ok", "presentation": {
+        "intraday_tendency": {"profile": [{"procurement_index": 100}]}}}}
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("cached presentation migration must not call the API")
+    result = eprx_ai_ui.run_ai_analysis_action(
+        context=context, region="Tokyo", week_start="2026-07-20",
+        file_fingerprint="files", model="model", session_state=session,
+        clicked=True, generator=forbidden)
+    assert result["presentation"]["presentation_version"] == eprx_ai_ui.PRESENTATION_VERSION
+
+
 def test_generate_button_visible_but_disabled_without_key_or_data(monkeypatch):
     no_key = _render(monkeypatch, api_key=None)
     assert next(item for item in no_key.buttons if item[0] == "AI 분석 생성")[1]["disabled"] is True
