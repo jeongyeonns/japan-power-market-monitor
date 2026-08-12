@@ -135,6 +135,7 @@ class RenderTarget:
         self.warnings.append(value)
 
     def caption(self, value, **kwargs):
+        self.events.append(("caption", value))
         self.captions.append(value)
 
     def line_chart(self, value, **kwargs):
@@ -444,7 +445,11 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
         assert forbidden not in rendered
     assert "한눈에 보기" not in rendered
     assert "분석 기준 — 먼저 읽어주세요" in rendered
-    assert "날씨 → 전력수요 · 태양광 · 풍력 → 잔여수요 → 잔여수요의 짧은 주기 변동 → 1차 조정력 평상시분" in rendered
+    assert "잔여수요란 전체 전력수요 중 태양광·풍력 같은 재생에너지 발전으로 충당하고도 남아 있는 수요" in rendered
+    assert "잔여수요 = 전력수요 - 태양광 발전량 - 풍력 발전량" in rendered
+    assert "잔여수요 → 짧은 시간의 변동 → 빠른 조정력 필요" in rendered
+    assert "날씨 → 수요·재생에너지 → 잔여수요 변동" in rendered
+    assert "실제 날씨 데이터가 연결되어 있지 않아" in rendered
     assert "공식 필요량을 재현한 값이 아닙니다" in rendered
     assert "시간대별 모집량·잔여수요 변동 경향" in rendered
     assert "중간 수준의 같은 방향 경향" in rendered
@@ -468,7 +473,7 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     assert "전력수요 − 태양광 발전량 − 풍력 발전량" in rendered
     assert "시간적으로 연속된 30분 잔여수요 값의 절대 변화량" in rendered
     assert "도쿄전력파워그리드(TEPCO PG)" in rendered
-    assert "이 화면은 EPRX 1차 조정력 모집량을 분석합니다" in rendered
+    assert "이 화면은 EPRX의 1차 조정력 모집량을 분석합니다" in rendered
     assert all(term in rendered for term in ("평상시분", "이상시분", "기타 요인"))
     basis_index = next(i for i, event in enumerate(target.events) if event[0] == "info" and "분석 기준" in event[1])
     metric_index = next(i for i, event in enumerate(target.events) if event[0] == "metric")
@@ -476,6 +481,13 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     background_index = next(i for i, event in enumerate(target.events) if event[0] == "markdown" and event[1] == "### 잔여수요 변동의 배경")
     tendency_index = next(i for i, event in enumerate(target.events) if event[0] == "markdown" and event[1] == "### 시간대별 모집량·잔여수요 변동 경향")
     assert metric_index < background_index < tendency_index
+    assert "데이터 출처: 도쿄전력파워그리드(TEPCO PG) 공개 지역 수급실적" in rendered
+    assert "분석주차 결합률 100.0%" in rendered
+    assert any("Tokyo · 2026-07-27" in value for value in target.captions)
+    pre_basis = target.events[:basis_index]
+    assert not any(event[0] == "caption" and
+                   ("계통자료 출처" in event[1] or "최신일" in event[1] or "결합 성공률" in event[1])
+                   for event in pre_basis)
 
 
 def test_chubu_presentation_uses_chubu_grid_source():

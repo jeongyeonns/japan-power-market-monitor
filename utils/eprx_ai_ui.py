@@ -501,14 +501,19 @@ def _render_level_profile(target, rows: list[dict[str, Any]]) -> None:
 def _render_analysis_basis(target) -> None:
     target.info(
         "**분석 기준 — 먼저 읽어주세요**\n\n"
-        "**① 무엇을 분석하나요?**  이 화면은 EPRX 1차 조정력 모집량을 분석합니다. 1차 조정력 필요량에는 평상시의 잔여수요 변동에 대응하는 부분과 발전기 탈락 등에 대비하는 이상시 대응 부분 등이 함께 반영될 수 있습니다. 현재 공개된 30분 수급실적으로 직접 살펴볼 수 있는 부분은 이 중 평상시의 잔여수요 변동과 관련된 영역입니다.\n\n"
+        "**① 무엇을 분석하나요?**\n\n"
+        "이 화면은 EPRX의 1차 조정력 모집량을 분석합니다. 1차 조정력은 평상시의 작은 수급 변동에 빠르게 대응하는 부분과 대형 발전기 탈락 같은 사고에 대비하는 부분으로 볼 수 있습니다. 공개된 수요·태양광·풍력 30분 자료로는 주로 평상시 수급 변동과 관련된 특징을 살펴봅니다.\n\n"
         "**② 왜 잔여수요를 보나요?**\n\n"
-        "날씨 → 전력수요 · 태양광 · 풍력 → 잔여수요 → 잔여수요의 짧은 주기 변동 → 1차 조정력 평상시분 → + 이상시분·기타 요인 → EPRX 모집량\n\n"
-        "잔여수요는 전력수요에서 태양광·풍력 발전량을 제외한 값입니다. 같은 전력수요라도 재생에너지 출력이 달라지면 계통이 실제로 부담하는 잔여수요가 달라집니다. 따라서 단순한 수요 수준보다 잔여수요 변동을 핵심 참고지표로 봅니다.\n\n"
-        "**③ 왜 날씨와 재생에너지를 보나요?**  날씨는 모집량에 직접 입력되는 단순 변수가 아니라 기온을 통해 수요를, 일사량·풍속을 통해 태양광·풍력 출력을 바꾸는 상위 요인입니다. 현재 날씨 자료는 분석값에 연결하지 않으며 메커니즘 설명에만 사용합니다."
+        "**잔여수요란 전체 전력수요 중 태양광·풍력 같은 재생에너지 발전으로 충당하고도 남아 있는 수요입니다.**\n\n"
+        "전력수요 − 태양광·풍력 → 잔여수요 → 짧은 시간의 변동 → 빠른 조정력 필요\n\n"
+        "잔여수요 = 전력수요 - 태양광 발전량 - 풍력 발전량입니다. 개념 예시로 수요가 40,000 MW이고 태양광·풍력이 5,000 MW를 공급하면 나머지 35,000 MW가 잔여수요입니다.\n\n"
+        "수요와 재생에너지 출력은 계속 변합니다. 잔여수요가 짧은 시간 안에 움직이면 발전기·ESS가 빠르게 출력을 조절해야 하므로 1차 조정력의 평상시분과 연결됩니다. 따라서 평균 수요 수준보다 30분 사이 잔여수요 변동을 핵심 보조지표로 봅니다.\n\n"
+        "날씨 → 수요·재생에너지 → 잔여수요 변동 → 1차 조정력 평상시분 → + 이상시분·기타 요인 → EPRX 모집량\n\n"
+        "**③ 왜 날씨와 재생에너지를 보나요?**\n\n"
+        "날씨가 모집량에 직접 입력되는 것은 아닙니다. 더위·추위는 냉난방 수요를 바꾸고, 일사량·풍속은 태양광·풍력 발전량을 바꿉니다. 결국 날씨 → 전력수요·재생에너지 출력 → 잔여수요 → 잔여수요 변동의 흐름으로 계통 상황에 영향을 줄 수 있습니다. 현재 앱에는 실제 날씨 데이터가 연결되어 있지 않아 날씨는 배경 설명에만 사용합니다."
     )
-    target.caption("※ 본 화면의 잔여수요 변동은 30분 공개자료로 계산한 보조지표입니다. 공식 1차 조정력 평상시분은 이보다 훨씬 짧은 주기의 잔여수요 데이터를 이용하므로, 아래 값은 공식 필요량을 재현한 값이 아닙니다.")
-    target.caption("※ 아래 분석은 모집량 변화의 원인을 확정하는 분석이 아니라, 공개자료에서 관찰되는 계통 변동 특성을 모집량과 함께 살펴보는 분석입니다.")
+    target.caption("※ 본 화면의 잔여수요 변동은 공개 30분 자료로 계산한 보조지표입니다. 공식 1차 조정력 평상시분은 더 짧은 주기의 데이터를 이용해 산정하므로 아래 값은 공식 필요량을 재현한 값이 아닙니다.")
+    target.caption("※ 따라서 본 분석은 모집량의 원인을 확정하는 것이 아니라, 공개자료에서 관찰되는 계통 변동 특성과 모집량의 움직임을 함께 살펴보는 참고 분석입니다.")
 
 
 def _render_direction_conclusion(target, conclusion: dict[str, str]) -> None:
@@ -691,7 +696,12 @@ def render_eprx_ai_result(target, result: dict[str, Any]) -> None:
         with target.expander("모집량 상세", expanded=False):
             target.table(pd.DataFrame(presentation.get("procurement_table", [])))
         source = presentation.get("grid_source_label", "지역 계통운영기관")
-        target.caption(f"계통실적: {source} 공개 30분 수급실적 · 잔여수요 = 전력수요 - 태양광 - 풍력")
+        rate = _finite_number(presentation.get("runtime_join_rate"))
+        rate_text = f" · 분석주차 결합률 {rate:.1%}" if rate is not None else ""
+        latest = presentation.get("runtime_latest_source_date")
+        latest_text = f" · 최신 데이터 {latest}" if latest else ""
+        target.caption(f"데이터 출처: {source} 공개 지역 수급실적 · 30분 단위 실제 실적{rate_text}{latest_text}")
+        target.caption("잔여수요 = 전력수요 - 태양광 - 풍력")
         return
     if result.get("status") == "ok" and "procurement_patterns" in result:
         target.markdown("#### AI 주간 모집량 분석")
@@ -742,11 +752,8 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
         st.session_state[readiness_key] = check_eprx_ai_readiness(eprx_df, region, week_start)
     readiness = st.session_state[readiness_key]
     timings["readiness_seconds"] = time.perf_counter() - readiness_started
-    target.caption(f"선택 지역: {region} · 선택 주차: {pd.Timestamp(week_start):%Y-%m-%d}")
+    target.caption(f"{region} · {pd.Timestamp(week_start):%Y-%m-%d}")
     rate = float(readiness.get("join_rate", 0.0))
-    if readiness.get("latest_source_date"):
-        target.caption(f"계통자료 출처: {'도쿄전력 PG' if region == 'Tokyo' else '중부전력 PG'} · 최신일: {readiness['latest_source_date']}")
-    target.caption(f"선택 주차 결합 성공률: {rate:.1%}")
     api_key, model = resolve_openai_settings()
     state = evaluate_eprx_ai_ui_state(market="EPRX", region=region, week_start=week_start,
         context_status=readiness["status"], complete_week=bool(readiness.get("complete_week")),
@@ -793,7 +800,13 @@ def render_eprx_ai_analysis_section(target, eprx_df: pd.DataFrame, region: str, 
                 target.json(build_eprx_statistical_fallback(detailed))
     if result:
         render_started = time.perf_counter()
-        render_eprx_ai_result(target, result)
+        runtime_result = dict(result)
+        if isinstance(result.get("presentation"), dict):
+            runtime_presentation = dict(result["presentation"])
+            runtime_presentation["runtime_join_rate"] = rate
+            runtime_presentation["runtime_latest_source_date"] = readiness.get("latest_source_date")
+            runtime_result["presentation"] = runtime_presentation
+        render_eprx_ai_result(target, runtime_result)
         timings["render_seconds"] = time.perf_counter() - render_started
         response_diagnostics = result.get("response_diagnostics", {})
         request_diagnostics = result.get("request_diagnostics", {})
