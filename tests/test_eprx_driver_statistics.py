@@ -14,6 +14,7 @@ from utils.eprx_driver_statistics import (
     analyze_eprx_driver_statistics,
     block_bootstrap_interval,
     build_eprx_fast_context,
+    build_intraday_profile_summary,
     build_eprx_statistical_context,
     co_movement_comparison,
     fit_standardized_model,
@@ -155,6 +156,34 @@ def test_fast_context_builds_48_slot_demand_profile_from_seven_daily_values():
     assert slot["renewable_generation_mw"] == pytest.approx(features.loc[
         timestamps.dt.date >= pd.Timestamp("2026-05-25").date()
     ].loc[timestamps.dt.strftime("%H:%M").eq("08:30"), "renewable_generation_mw"].mean())
+    summary = context["selected_week"]["intraday_profile_summary"]
+    assert summary["status"] == "available" and summary["slot_count"] == 48
+    assert len(summary["profile"]) == 48
+    assert np.mean([row["procurement_index"] for row in summary["profile"]]) == pytest.approx(100)
+    assert np.mean([row["residual_volatility_index"] for row in summary["profile"]]) == pytest.approx(100)
+    expected_ramp = features.loc[
+        timestamps.dt.date >= pd.Timestamp("2026-05-25").date()
+    ].loc[timestamps.dt.strftime("%H:%M").eq("08:30"), "abs_residual_demand_ramp_30m_mw"].mean()
+    assert slot["abs_residual_demand_ramp_30m_mw"] == pytest.approx(expected_ramp)
+    assert len(summary["procurement_high_slots"]) == 12
+    assert len(summary["residual_vol_high_slots"]) == 12
+    assert summary["high_slot_overlap_count"] == len(set(summary["procurement_high_slots"]) & set(summary["residual_vol_high_slots"]))
+
+
+def test_intraday_profile_summary_positive_negative_and_weak_patterns():
+    slots = [f"{minute // 60:02d}:{minute % 60:02d}" for minute in range(0, 1440, 30)]
+    procurement = np.arange(48, dtype=float) + 1
+    def summarize(volatility):
+        return build_intraday_profile_summary(pd.DataFrame({"time_block": slots,
+            "procurement_mw": procurement,
+            "abs_residual_demand_ramp_30m_mw": volatility}))
+    positive = summarize(procurement * 2)
+    negative = summarize(procurement[::-1])
+    weak = summarize(np.roll(procurement, 12))
+    assert positive["profile_direction"] == "same" and positive["profile_spearman"] == pytest.approx(1)
+    assert positive["high_slot_overlap_count"] == 12
+    assert negative["profile_direction"] == "opposite" and negative["profile_spearman"] == pytest.approx(-1)
+    assert weak["profile_strength"] == "none"
 
 
 def test_correlation_strength_uses_non_exaggerating_thresholds():

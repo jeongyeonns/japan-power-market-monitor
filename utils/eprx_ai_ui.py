@@ -183,6 +183,31 @@ def _build_direction_conclusion(procurement: dict[str, Any], comparison: dict[st
         "opposite": ("🟠 모집량과 잔여수요 변동은 서로 다른 방향으로 움직였습니다.", "● 다른 방향"),
         "undetermined": ("⚪ 이번 주에는 두 지표의 방향 관계를 뚜렷하게 판단하기 어렵습니다.", "● 뚜렷한 방향 없음"),
     }
+
+
+def _build_intraday_tendency(summary: dict[str, Any]) -> dict[str, Any]:
+    if summary.get("status") != "available":
+        return {"status": "unavailable", "headline": "시간대별 경향을 계산할 자료가 충분하지 않습니다."}
+    rho = _finite_number(summary.get("profile_spearman"))
+    strength = summary.get("profile_strength")
+    direction = summary.get("profile_direction")
+    strength_labels = {"none": "뚜렷하지 않은", "weak": "약한", "moderate": "중간 수준의",
+                       "strong": "강한", "very_strong": "매우 강한"}
+    if direction == "none":
+        headline = "⚪ 이번 주에는 모집량과 잔여수요 변동 사이에 뚜렷한 시간대 경향이 확인되지 않았습니다."
+        detail = "두 지표가 높은 시간대가 일관되게 겹친다고 보기는 어렵습니다."
+    elif direction == "same":
+        headline = "🟢 모집량이 높은 시간대에서 잔여수요 변동도 비교적 크게 나타났습니다."
+        detail = f"시간대 패턴은 {strength_labels.get(strength, '')} 같은 방향 경향을 보였습니다."
+    else:
+        headline = "🟠 모집량이 높은 시간대와 잔여수요 변동이 큰 시간대가 다르게 나타났습니다."
+        detail = (f"시간대 패턴은 {strength_labels.get(strength, '')} 반대 방향 경향을 보였습니다. "
+                  "공개 30분 변동 패턴만으로 모집량의 시간대별 차이를 설명하기 어렵습니다.")
+    overlap = int(summary.get("high_slot_overlap_count") or 0)
+    return {"status": "available", "headline": headline, "detail": detail,
+            "rho": rho, "overlap_count": overlap, "overlap_pct": summary.get("high_slot_overlap_pct"),
+            "overlap_text": f"모집량이 높은 상위 12개 시간대 중 {overlap}개 시간대에서 잔여수요 변동도 상위 25%였습니다.",
+            "profile": summary.get("profile", [])}
     headline, badge = labels[status]
     current_volatility = volatility.get("current")
     previous_volatility = volatility.get("previous")
@@ -217,6 +242,7 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
     high = (notable.get("highest") or [{}])[0]; low = (notable.get("lowest") or [{}])[0]
     changes = selected.get("driver_changes", {}) or {}
     historical = selected.get("historical_position", {}) or {}
+    intraday_summary = selected.get("intraday_profile_summary", {}) or {}
     demand_change = changes.get("mean_demand_mw", {}) or {}
     residual_change = changes.get("mean_residual_demand_proxy_mw", {}) or {}
     renewable_change = changes.get("mean_renewable_generation_mw", {}) or {}
@@ -332,6 +358,7 @@ def build_eprx_readable_presentation(context: dict[str, Any]) -> dict[str, Any]:
         "comparison_table": comparison_table, "relationship_intro": relationship_intro, "relationship_table": relationship_table,
         "detail_table": detail_table,
         "direction_conclusion": direction_conclusion,
+        "intraday_tendency": _build_intraday_tendency(intraday_summary),
         "volatility_detail": (f"이번 주 Δ잔여수요 표준편차 {format_mw(volatility_std_change.get('current'))} / "
                               f"최대 |Δ잔여수요| {format_mw(volatility_max_change.get('current'))}"),
         "demand_intraday_profile": profile,
@@ -411,6 +438,24 @@ def _render_intraday_demand_profile(target, rows: list[dict[str, Any]]) -> None:
     if "평균 |Δ잔여수요|" in indexed:
         target.line_chart(indexed[["평균 |Δ잔여수요|"]], use_container_width=True)
     target.caption("각 값은 선택 주차에서 동일한 시간대의 30분 잔여수요 변화량 절댓값을 평균한 값입니다. 어느 시간대에서 계통의 잔여수요 변화가 크게 나타났는지 보여줍니다.")
+
+
+def _render_intraday_tendency(target, tendency: dict[str, Any]) -> None:
+    target.markdown("### 시간대별 모집량·잔여수요 변동 경향")
+    target.write("아래 그래프는 선택 주차의 7일을 동일한 30분 시간대끼리 평균하여, 모집량이 높은 시간대와 잔여수요 변동이 큰 시간대가 얼마나 겹치는지를 비교합니다. 두 지표는 단위가 달라 각 주간 평균을 100으로 환산했습니다.")
+    profile = pd.DataFrame(tendency.get("profile", [])).rename(columns={
+        "time_block": "시간대", "procurement_index": "1차 조정력 모집량",
+        "residual_volatility_index": "잔여수요 30분 변동"})
+    if not profile.empty:
+        target.line_chart(profile.set_index("시간대")[["1차 조정력 모집량", "잔여수요 30분 변동"]],
+                          use_container_width=True)
+    target.caption("주간 평균 = 100. 이 비교는 시간대별 경향성을 확인하기 위한 참고 분석이며 공식 1차 조정력 산정값이나 인과관계를 의미하지 않습니다.")
+    target.markdown("### 시간대별 경향성")
+    if tendency.get("status") != "available":
+        target.info(tendency.get("headline", "시간대별 경향을 계산할 수 없습니다.")); return
+    target.info(f"**{tendency.get('headline')}**\n\n{tendency.get('detail')}\n\n{tendency.get('overlap_text')}")
+    target.markdown(f"**시간대 패턴 상관 ρ = {format_correlation(tendency.get('rho'))} · 높은 시간대 겹침 {tendency.get('overlap_count')}/12**")
+    target.caption("두 지표 모두 하루 중 반복되는 시간대 패턴을 가질 수 있으므로, 이 결과는 48-slot 평균 일중 패턴의 유사성을 보는 참고지표입니다. 잔여수요 변동이 모집량을 결정했다는 의미가 아닙니다.")
 
 
 def _render_level_profile(target, rows: list[dict[str, Any]]) -> None:
@@ -587,13 +632,10 @@ def render_eprx_ai_result(target, result: dict[str, Any]) -> None:
     if result.get("status") == "ok" and isinstance(presentation, dict):
         _render_analysis_basis(target)
         _render_summary_cards(target, presentation.get("summary_cards", []))
-        _render_direction_conclusion(target, presentation.get("direction_conclusion", {}))
         target.markdown("### 잔여수요 변동의 배경")
         target.caption("잔여수요는 전력수요와 재생에너지 출력의 차이로 만들어집니다. 아래 표는 잔여수요 변동과 그 배경이 되는 수요·재생에너지 변동 수준을 보여줍니다.")
-        target.markdown(f"**{presentation.get('direction_conclusion', {}).get('comparison_line', '')}**")
         target.table(pd.DataFrame(presentation.get("comparison_table", [])))
-        target.markdown("### 시간대별 잔여수요 변동")
-        _render_intraday_demand_profile(target, presentation.get("demand_intraday_profile", []))
+        _render_intraday_tendency(target, presentation.get("intraday_tendency", {}))
         target.markdown("### 이번 주 해석")
         for value in presentation.get("interpretation", []): target.markdown(f"- {value}")
         with target.expander("수요·재생에너지 상세", expanded=False):

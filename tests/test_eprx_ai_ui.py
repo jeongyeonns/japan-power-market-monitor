@@ -324,6 +324,19 @@ def test_weekly_direction_classification(procurement, volatility, expected):
     assert eprx_ai_ui.classify_weekly_direction(procurement, volatility) == expected
 
 
+@pytest.mark.parametrize(("direction", "strength", "expected"), [
+    ("same", "moderate", "같은 방향 경향"),
+    ("opposite", "moderate", "반대 방향 경향"),
+    ("none", "none", "뚜렷한 시간대 경향이 확인되지 않았습니다"),
+])
+def test_intraday_tendency_wording(direction, strength, expected):
+    result = eprx_ai_ui._build_intraday_tendency({
+        "status": "available", "profile_spearman": 0.5 if direction == "same" else -0.5,
+        "profile_direction": direction, "profile_strength": strength,
+        "high_slot_overlap_count": 6, "high_slot_overlap_pct": 50, "profile": []})
+    assert expected in result["headline"] + result["detail"]
+
+
 def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     context = {"region": "Tokyo", "selected_week": {
         "week": {"start": "2026-07-20", "end": "2026-07-26"},
@@ -354,7 +367,19 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
                  "residual_demand_mw": 36000.0, "renewable_generation_mw": 5000.0,
                  "abs_residual_demand_ramp_30m_mw": 900.0,
              "observation_count": 7},
-        ],
+            ],
+        "intraday_profile_summary": {"status": "available", "slot_count": 48,
+            "profile_spearman": 0.52, "profile_direction": "same", "profile_strength": "moderate",
+            "high_slot_overlap_count": 8, "high_slot_overlap_pct": 66.6667,
+            "procurement_high_slots": [f"{hour:02d}:00" for hour in range(12)],
+            "residual_vol_high_slots": [f"{hour:02d}:00" for hour in range(8)] + ["12:00", "13:00", "14:00", "15:00"],
+            "profile": [
+                {"time_block": "00:00", "procurement_mw": 550.0,
+                 "abs_residual_demand_ramp_30m_mw": 700.0,
+                 "procurement_index": 95.0, "residual_volatility_index": 90.0},
+                {"time_block": "08:30", "procurement_mw": 590.0,
+                 "abs_residual_demand_ramp_30m_mw": 900.0,
+                 "procurement_index": 105.0, "residual_volatility_index": 110.0}]},
     }, "selected_week_correlations": {
         "demand_mw": {"pearson": 0.5775835870089938, "spearman": 0.46633704875086757},
         "residual_demand_proxy_mw": {"pearson": 0.5629575833976636,
@@ -387,10 +412,9 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     assert "분석 기준 — 먼저 읽어주세요" in rendered
     assert "날씨 → 전력수요 · 태양광 · 풍력 → 잔여수요 → 잔여수요의 짧은 주기 변동 → 1차 조정력 평상시분" in rendered
     assert "공식 필요량을 재현한 값이 아닙니다" in rendered
-    assert "모집량과 잔여수요 변동이 같은 방향으로 움직였습니다" in rendered
-    assert "모집량  504.4 MW → 572.4 MW  ↑ +13.5%" in rendered
-    assert "잔여수요 변동  685.6 MW → 772.1 MW  ↑ +12.6%" in rendered
-    assert "연속된 30분 구간 사이에서 평균 772.1 MW" in rendered
+    assert "시간대별 모집량·잔여수요 변동 경향" in rendered
+    assert "중간 수준의 같은 방향 경향" in rendered
+    assert "ρ = +0.52" in rendered and "높은 시간대 겹침 8/12" in rendered
     assert all(forbidden not in rendered for forbidden in ("잔여수요가 모집량을 증가", "잔여수요가 모집량을 결정", "잔여수요 변동 때문에"))
     assert "중간 수준 · 같은 방향" in rendered and "모집량의 공식 산정 원인을 의미하지 않습니다" in rendered
     assert "유의" not in rendered
@@ -399,7 +423,7 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     assert set(target.tables[2]["변수"]) == {"전력수요", "잔여수요", "태양광+풍력 발전량", "잔여수요 변동폭 |Δ잔여수요|"}
     assert len(target.line_charts) == 2
     assert list(target.line_charts[0][0].index) == ["00:00", "08:30"]
-    assert list(target.line_charts[0][0].columns) == ["평균 |Δ잔여수요|"]
+    assert list(target.line_charts[0][0].columns) == ["1차 조정력 모집량", "잔여수요 30분 변동"]
     assert "전력수요 − 태양광 발전량 − 풍력 발전량" in rendered
     assert "시간적으로 연속된 30분 잔여수요 값의 절대 변화량" in rendered
     assert "도쿄전력파워그리드(TEPCO PG)" in rendered
@@ -408,9 +432,9 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     basis_index = next(i for i, event in enumerate(target.events) if event[0] == "info" and "분석 기준" in event[1])
     metric_index = next(i for i, event in enumerate(target.events) if event[0] == "metric")
     assert basis_index < metric_index
-    conclusion_index = next(i for i, event in enumerate(target.events) if event[0] == "markdown" and event[1] == "### 이번 주 결론")
     background_index = next(i for i, event in enumerate(target.events) if event[0] == "markdown" and event[1] == "### 잔여수요 변동의 배경")
-    assert metric_index < conclusion_index < background_index
+    tendency_index = next(i for i, event in enumerate(target.events) if event[0] == "markdown" and event[1] == "### 시간대별 모집량·잔여수요 변동 경향")
+    assert metric_index < background_index < tendency_index
 
 
 def test_chubu_presentation_uses_chubu_grid_source():

@@ -20,7 +20,7 @@ MIN_REGRESSION_SAMPLES = 200
 MIN_BOOTSTRAP_DAYS = 7
 RUNTIME_BOOTSTRAP_ITERATIONS = 100
 MAX_BOOTSTRAP_PREDICTORS = 5
-FAST_CONTEXT_VERSION = "5"
+FAST_CONTEXT_VERSION = "6"
 FAST_PREDICTORS = (
     "demand_mw",
     "renewable_generation_mw",
@@ -184,6 +184,55 @@ def calculate_correlations(data: pd.DataFrame, anomaly: bool = False) -> dict[st
     return output
 
 
+def build_intraday_profile_summary(profile: pd.DataFrame) -> dict[str, Any]:
+    """Summarize the 48-slot average-day pattern, separate from 336-point statistics."""
+    required = {"time_block", "procurement_mw", "abs_residual_demand_ramp_30m_mw"}
+    if not required.issubset(profile.columns):
+        return {"status": "unavailable", "reason": "missing_columns"}
+    data = profile[list(required)].copy().sort_values("time_block", kind="stable")
+    data["procurement_mw"] = pd.to_numeric(data["procurement_mw"], errors="coerce")
+    data["abs_residual_demand_ramp_30m_mw"] = pd.to_numeric(
+        data["abs_residual_demand_ramp_30m_mw"], errors="coerce")
+    pair = data.dropna()
+    if len(pair) != 48 or pair["time_block"].nunique() != 48:
+        return {"status": "unavailable", "reason": "incomplete_48_slot_profile",
+                "slot_count": len(pair)}
+    procurement_mean = pair["procurement_mw"].mean()
+    volatility_mean = pair["abs_residual_demand_ramp_30m_mw"].mean()
+    if procurement_mean == 0 or volatility_mean == 0:
+        return {"status": "unavailable", "reason": "zero_profile_mean", "slot_count": 48}
+    pair["procurement_index"] = pair["procurement_mw"] / procurement_mean * 100
+    pair["residual_volatility_index"] = (
+        pair["abs_residual_demand_ramp_30m_mw"] / volatility_mean * 100)
+    rho = float(pair["procurement_mw"].rank(method="average").corr(
+        pair["abs_residual_demand_ramp_30m_mw"].rank(method="average")))
+    absolute = abs(rho)
+    strength = ("none" if absolute < 0.20 else "weak" if absolute < 0.40
+                else "moderate" if absolute < 0.60 else "strong" if absolute < 0.80
+                else "very_strong")
+    direction = "none" if strength == "none" else ("same" if rho > 0 else "opposite")
+    procurement_high = pair.sort_values(
+        ["procurement_mw", "time_block"], ascending=[False, True], kind="stable"
+    ).head(12)["time_block"].tolist()
+    volatility_high = pair.sort_values(
+        ["abs_residual_demand_ramp_30m_mw", "time_block"], ascending=[False, True], kind="stable"
+    ).head(12)["time_block"].tolist()
+    overlap = sorted(set(procurement_high) & set(volatility_high))
+    matching = pair.loc[
+        pair["time_block"].isin(overlap)
+    ].assign(score=lambda x: x["procurement_index"] + x["residual_volatility_index"]).nlargest(3, "score")["time_block"].tolist()
+    mismatch = pair.assign(gap=lambda x: (x["procurement_index"] - x["residual_volatility_index"]).abs()).nlargest(2, "gap")["time_block"].tolist()
+    return {"status": "available", "slot_count": 48, "profile_spearman": rho,
+            "profile_direction": direction, "profile_strength": strength,
+            "procurement_high_slots": procurement_high,
+            "residual_vol_high_slots": volatility_high,
+            "high_slot_overlap_count": len(overlap),
+            "high_slot_overlap_pct": len(overlap) / 12 * 100,
+            "top_matching_periods": matching, "top_mismatching_periods": mismatch,
+            "profile": pair[["time_block", "procurement_mw", "abs_residual_demand_ramp_30m_mw",
+                             "procurement_index", "residual_volatility_index"]].to_dict("records")}
+
+
 def build_eprx_fast_context(
     feature_df: pd.DataFrame, region: str, week_start: Any,
 ) -> dict[str, Any]:
@@ -203,7 +252,7 @@ def build_eprx_fast_context(
     selected = frame.loc[timestamps.ge(start) & timestamps.lt(start + pd.Timedelta(days=7))].copy()
     selected["procurement_volume_mw"] = pd.to_numeric(selected["procurement_volume"], errors="coerce")
     selected["time_block"] = timestamps.loc[selected.index].dt.strftime("%H:%M")
-    intraday_profile = (
+    intraday_frame = (
         selected.groupby("time_block", sort=True)
         .agg(
             procurement_mw=("procurement_volume_mw", "mean"),
@@ -214,8 +263,9 @@ def build_eprx_fast_context(
             observation_count=("datetime_jst", "count"),
         )
         .reset_index()
-        .to_dict("records")
     )
+    intraday_profile = intraday_frame.to_dict("records")
+    intraday_summary = build_intraday_profile_summary(intraday_frame)
     correlations = {}
     for predictor in FAST_PREDICTORS:
         source = SOURCE_COLUMNS[predictor]
@@ -225,6 +275,7 @@ def build_eprx_fast_context(
         "week": base["week"], "procurement": base["procurement"],
         "daily_profile": base["daily_profile"], "notable_time_blocks": base["notable_time_blocks"],
         "demand_intraday_profile": intraday_profile,
+        "intraday_profile_summary": intraday_summary,
         "historical_position": base["historical_position"],
         "procurement_change": base["previous_week_comparison"].get("procurement_mean_mw"),
         "driver_changes": {key: value for key, value in base["previous_week_comparison"].items()
