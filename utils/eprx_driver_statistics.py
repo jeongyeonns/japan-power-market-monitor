@@ -20,7 +20,7 @@ MIN_REGRESSION_SAMPLES = 200
 MIN_BOOTSTRAP_DAYS = 7
 RUNTIME_BOOTSTRAP_ITERATIONS = 100
 MAX_BOOTSTRAP_PREDICTORS = 5
-FAST_CONTEXT_VERSION = "3"
+FAST_CONTEXT_VERSION = "5"
 FAST_PREDICTORS = (
     "demand_mw",
     "renewable_generation_mw",
@@ -29,6 +29,7 @@ FAST_PREDICTORS = (
     "abs_renewable_ramp_30m_mw",
     "abs_solar_ramp_30m_mw",
     "abs_demand_ramp_30m_mw",
+    "abs_residual_demand_ramp_30m_mw",
 )
 
 SOURCE_COLUMNS = {
@@ -208,6 +209,7 @@ def build_eprx_fast_context(
             procurement_mw=("procurement_volume_mw", "mean"),
             demand_mw=("area_demand_mw", "mean"),
             residual_demand_mw=("residual_demand_proxy_mw", "mean"),
+            abs_residual_demand_ramp_30m_mw=("abs_residual_demand_ramp_30m_mw", "mean"),
             renewable_generation_mw=("renewable_generation_mw", "mean"),
             observation_count=("datetime_jst", "count"),
         )

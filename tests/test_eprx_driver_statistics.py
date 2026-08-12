@@ -203,7 +203,8 @@ def test_fast_context_skips_anomaly_bootstrap_and_regression(monkeypatch):
     monkeypatch.setattr(statistics_module, "_regression_models", forbidden)
     context = build_eprx_fast_context(_feature_history(), "Tokyo", "2026-05-25")
     assert context["analysis_mode"] == "fast"
-    assert len(context["selected_week_correlations"]) == 7
+    assert len(context["selected_week_correlations"]) == 8
+    assert "abs_residual_demand_ramp_30m_mw" in context["selected_week_correlations"]
     assert context["selected_week"]["procurement"]["valid_count"] == 336
 
 

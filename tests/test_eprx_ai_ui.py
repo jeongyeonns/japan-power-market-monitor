@@ -79,6 +79,7 @@ def test_fast_history_cache_reuses_parsed_features_across_weeks(monkeypatch):
 
 class RenderTarget:
     def __init__(self, clicked_labels=()):
+        self.events = []
         self.buttons = []
         self.expanders = []
         self.markdowns = []
@@ -104,6 +105,7 @@ class RenderTarget:
         return nullcontext()
 
     def markdown(self, value, **kwargs):
+        self.events.append(("markdown", value))
         self.markdowns.append(value)
 
     def write(self, value, **kwargs):
@@ -116,12 +118,15 @@ class RenderTarget:
         return [self] * count
 
     def metric(self, **kwargs):
+        self.events.append(("metric", kwargs))
         self.metrics.append(kwargs)
 
     def table(self, value, **kwargs):
+        self.events.append(("table", value))
         self.tables.append(value)
 
     def info(self, value, **kwargs):
+        self.events.append(("info", value))
         self.infos.append(value)
 
     def warning(self, value, **kwargs):
@@ -318,16 +323,25 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
         "notable_time_blocks": {
             "highest": [{"time_block": "08:30", "average_procurement_mw": 591.1428571428571}],
             "lowest": [{"time_block": "03:00", "average_procurement_mw": 548.2857142857143}]},
-        "driver_changes": {
-            "mean_demand_mw": {"current": 40022.9},
-            "mean_residual_demand_proxy_mw": {"current": 35877.1},
-            "mean_renewable_generation_mw": {"current": 4145.8}},
+            "driver_changes": {
+                "mean_demand_mw": {"current": 40022.9},
+                "mean_residual_demand_proxy_mw": {"current": 35877.1},
+                "mean_renewable_generation_mw": {"current": 4145.8},
+                "mean_solar_mw": {"current": 3900.0},
+                "mean_wind_mw": {"current": 245.8},
+                "mean_renewable_share_pct": {"current": 9.0114},
+                "mean_abs_residual_demand_ramp_30m_mw": {"current": 772.1, "previous": 685.6},
+                "mean_abs_demand_ramp_30m_mw": {"current": 640.0, "previous": 600.0},
+                "mean_abs_renewable_ramp_30m_mw": {"current": 310.0, "previous": 280.0},
+                "p95_abs_residual_demand_ramp_30m_mw": {"current": 1240.0}},
         "demand_intraday_profile": [
-            {"time_block": "00:00", "procurement_mw": 550.0, "demand_mw": 39000.0,
-             "residual_demand_mw": 37000.0, "renewable_generation_mw": 2000.0,
-             "observation_count": 7},
+                {"time_block": "00:00", "procurement_mw": 550.0, "demand_mw": 39000.0,
+                 "residual_demand_mw": 37000.0, "renewable_generation_mw": 2000.0,
+                 "abs_residual_demand_ramp_30m_mw": 700.0,
+                 "observation_count": 7},
             {"time_block": "08:30", "procurement_mw": 590.0, "demand_mw": 41000.0,
-             "residual_demand_mw": 36000.0, "renewable_generation_mw": 5000.0,
+                 "residual_demand_mw": 36000.0, "renewable_generation_mw": 5000.0,
+                 "abs_residual_demand_ramp_30m_mw": 900.0,
              "observation_count": 7},
         ],
     }, "selected_week_correlations": {
@@ -352,29 +366,32 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     for expected in ("572.4 MW", "504.4 MW", "68.0 MW", "13.5%", "544.0", "599.0",
                      "591.1 MW", "548.3 MW", "40,022.9 MW", "35,877.1 MW",
                      "4,145.8 MW", "r = +0.58", "ρ = +0.47", "r = +0.56",
-                     "ρ = +0.45", "r = -0.31", "재생에너지 출력량", "잔여수요"):
+                     "ρ = +0.45", "r = -0.31", "태양광+풍력 발전량", "잔여수요"):
         assert expected in rendered
     for forbidden in ("572.425595", "504.422619", "0.577583587", "Pearson r = +572",
                       "Pearson r = +544", "coefficient", "residual_demand_proxy_mw",
                       "Spearman CI ["):
         assert forbidden not in rendered
     assert "한눈에 보기" not in rendered
-    assert "전력수요와 잔여수요가 높은 시간대" in rendered
-    assert "중간 수준 · 같은 방향" in rendered and "인과관계를 의미하지 않습니다" in rendered
+    assert "분석 기준 — 먼저 읽어주세요" in rendered
+    assert "날씨 → 전력수요 · 태양광 · 풍력 → 잔여수요 → 잔여수요의 짧은 주기 변동 → 1차 조정력 평상시분" in rendered
+    assert "공식 필요량을 재현한 값이 아닙니다" in rendered
+    assert "중간 수준 · 같은 방향" in rendered and "모집량의 공식 산정 원인을 의미하지 않습니다" in rendered
     assert "유의" not in rendered
-    assert len(target.metrics) == 5 and len(target.tables) == 2
-    assert set(target.tables[1]["변수"]) == {"전력수요", "잔여수요 추정치", "재생에너지 출력량"}
-    assert all(column in target.tables[1] for column in ("이번 주 평균", "모집량과의 관계", "해석", "데이터 출처", "값의 의미"))
-    assert len(target.line_charts) == 1
+    assert len(target.metrics) == 4 and len(target.tables) == 4
+    assert list(target.tables[0]["지표"]) == ["잔여수요 30분 평균 변동폭", "전력수요 30분 평균 변동폭", "재생에너지 30분 평균 변동폭"]
+    assert set(target.tables[2]["변수"]) == {"전력수요", "잔여수요", "태양광+풍력 발전량", "잔여수요 변동폭 |Δ잔여수요|"}
+    assert len(target.line_charts) == 2
     assert list(target.line_charts[0][0].index) == ["00:00", "08:30"]
-    assert list(target.line_charts[0][0].columns) == ["모집량", "전력수요", "잔여수요", "재생에너지 출력량"]
-    assert "왜 잔여수요를 같이 보나요?" in rendered
-    assert "실제로 사용된 전력수요의 30분 실적" in rendered
-    assert "전력수요에서 태양광·풍력 발전량을 뺀 값" in rendered
-    assert "태양광·풍력 발전량을 합산한 값" in rendered
+    assert list(target.line_charts[0][0].columns) == ["평균 |Δ잔여수요|"]
+    assert "전력수요 − 태양광 발전량 − 풍력 발전량" in rendered
+    assert "시간적으로 연속된 30분 잔여수요 값의 절대 변화량" in rendered
     assert "도쿄전력파워그리드(TEPCO PG)" in rendered
-    assert "1차 조정력(一次調整力)만 분석" in rendered and "2차 조정력과 3차 조정력" in rendered
-    assert all(term in rendered for term in ("평상시분", "이상시분", "자연체여력"))
+    assert "이 화면은 EPRX 1차 조정력 모집량을 분석합니다" in rendered
+    assert all(term in rendered for term in ("평상시분", "이상시분", "기타 요인"))
+    basis_index = next(i for i, event in enumerate(target.events) if event[0] == "info" and "분석 기준" in event[1])
+    metric_index = next(i for i, event in enumerate(target.events) if event[0] == "metric")
+    assert basis_index < metric_index
 
 
 def test_chubu_presentation_uses_chubu_grid_source():

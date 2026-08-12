@@ -281,6 +281,16 @@ def _week_metrics(data: pd.DataFrame) -> dict[str, Any]:
         "procurement_median_mw": procurement["median"],
     }
     result.update({name: _number_or_none(data[column].mean()) for name, column in DRIVER_METRICS.items()})
+    residual_ramp = pd.to_numeric(data["residual_demand_ramp_30m_mw"], errors="coerce")
+    # The source values are 30-minute average MW, so interval energy is MW × 0.5 h.
+    result.update({
+        "total_demand_mwh": _number_or_none(pd.to_numeric(data["area_demand_mw"], errors="coerce").sum(min_count=1) * 0.5),
+        "total_solar_generation_mwh": _number_or_none(pd.to_numeric(data["solar_generation_mw"], errors="coerce").sum(min_count=1) * 0.5),
+        "total_wind_generation_mwh": _number_or_none(pd.to_numeric(data["wind_generation_mw"], errors="coerce").sum(min_count=1) * 0.5),
+        "residual_demand_ramp_std_30m_mw": _number_or_none(residual_ramp.std(ddof=STANDARD_DEVIATION_DDOF)),
+        "maximum_abs_residual_demand_ramp_30m_mw": _number_or_none(residual_ramp.abs().max()),
+        "p95_abs_residual_demand_ramp_30m_mw": _number_or_none(residual_ramp.abs().quantile(0.95)),
+    })
     return result
 
 
