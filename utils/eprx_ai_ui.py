@@ -7,6 +7,8 @@ import time
 from typing import Any, Callable, MutableMapping
 
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from utils.eprx_ai_analysis import (
     build_eprx_statistical_fallback,
@@ -442,20 +444,48 @@ def _render_intraday_demand_profile(target, rows: list[dict[str, Any]]) -> None:
 
 def _render_intraday_tendency(target, tendency: dict[str, Any]) -> None:
     target.markdown("### 시간대별 모집량·잔여수요 변동 경향")
-    target.write("아래 그래프는 선택 주차의 7일을 동일한 30분 시간대끼리 평균하여, 모집량이 높은 시간대와 잔여수요 변동이 큰 시간대가 얼마나 겹치는지를 비교합니다. 두 지표는 단위가 달라 각 주간 평균을 100으로 환산했습니다.")
-    profile = pd.DataFrame(tendency.get("profile", [])).rename(columns={
-        "time_block": "시간대", "procurement_index": "1차 조정력 모집량",
-        "residual_volatility_index": "잔여수요 30분 변동"})
+    target.write("아래 그래프는 선택 주차의 7일을 동일한 30분 시간대끼리 평균하여, 모집량과 잔여수요 변동의 하루 시간대별 패턴을 비교합니다. 두 지표의 값 범위가 달라 모집량은 왼쪽 축, 잔여수요 변동폭은 오른쪽 축에 각각 실제 MW 단위로 표시합니다.")
+    profile = pd.DataFrame(tendency.get("profile", []))
     if not profile.empty:
-        target.line_chart(profile.set_index("시간대")[["1차 조정력 모집량", "잔여수요 30분 변동"]],
-                          use_container_width=True)
-    target.caption("주간 평균 = 100. 이 비교는 시간대별 경향성을 확인하기 위한 참고 분석이며 공식 1차 조정력 산정값이나 인과관계를 의미하지 않습니다.")
+        figure = _intraday_dual_axis_figure(profile)
+        target.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+    target.caption("※ 두 Y축의 눈금 범위가 서로 다르므로 선의 높이나 기울기 자체를 직접 비교하기보다, 어느 시간대에서 각각 증가·감소하는지와 패턴의 방향을 중심으로 확인해 주세요.")
+    target.caption("이 비교는 시간대별 경향성을 확인하기 위한 참고 분석이며 공식 1차 조정력 산정값이나 인과관계를 의미하지 않습니다.")
     target.markdown("### 시간대별 경향성")
     if tendency.get("status") != "available":
         target.info(tendency.get("headline", "시간대별 경향을 계산할 수 없습니다.")); return
     target.info(f"**{tendency.get('headline')}**\n\n{tendency.get('detail')}\n\n{tendency.get('overlap_text')}")
     target.markdown(f"**시간대 패턴 상관 ρ = {format_correlation(tendency.get('rho'))} · 높은 시간대 겹침 {tendency.get('overlap_count')}/12**")
     target.caption("두 지표 모두 하루 중 반복되는 시간대 패턴을 가질 수 있으므로, 이 결과는 48-slot 평균 일중 패턴의 유사성을 보는 참고지표입니다. 잔여수요 변동이 모집량을 결정했다는 의미가 아닙니다.")
+
+
+def _intraday_dual_axis_figure(profile: pd.DataFrame) -> go.Figure:
+    """Plot raw MW profiles on independent axes with a shared hover."""
+    frame = profile.sort_values("time_block", kind="stable").copy()
+    custom = frame[["procurement_mw", "abs_residual_demand_ramp_30m_mw"]].to_numpy()
+    figure = make_subplots(specs=[[{"secondary_y": True}]])
+    figure.add_trace(go.Scatter(
+        x=frame["time_block"], y=frame["procurement_mw"], name="1차 조정력 모집량",
+        mode="lines", line={"color": "#2563EB", "width": 2.5}, customdata=custom,
+        hovertemplate=("시간대 %{x}<br>1차 조정력 모집량: %{customdata[0]:,.1f} MW"
+                       "<br>잔여수요 30분 변동폭: %{customdata[1]:,.1f} MW<extra></extra>"),
+    ), secondary_y=False)
+    figure.add_trace(go.Scatter(
+        x=frame["time_block"], y=frame["abs_residual_demand_ramp_30m_mw"],
+        name="잔여수요 30분 변동폭", mode="lines", line={"color": "#D97706", "width": 2.5, "dash": "dot"},
+        customdata=custom,
+        hovertemplate=("시간대 %{x}<br>1차 조정력 모집량: %{customdata[0]:,.1f} MW"
+                       "<br>잔여수요 30분 변동폭: %{customdata[1]:,.1f} MW<extra></extra>"),
+    ), secondary_y=True)
+    figure.update_xaxes(title_text="시간대", tickmode="array",
+                        tickvals=frame["time_block"].iloc[::4].tolist())
+    figure.update_yaxes(title_text="1차 조정력 모집량 (MW)", secondary_y=False,
+                        title_font={"color": "#2563EB"}, tickfont={"color": "#2563EB"})
+    figure.update_yaxes(title_text="잔여수요 30분 변동폭 (MW)", secondary_y=True,
+                        title_font={"color": "#D97706"}, tickfont={"color": "#D97706"})
+    figure.update_layout(height=420, hovermode="x unified", margin={"l": 20, "r": 20, "t": 25, "b": 20},
+                         legend={"orientation": "h", "y": 1.08, "x": 0})
+    return figure
 
 
 def _render_level_profile(target, rows: list[dict[str, Any]]) -> None:

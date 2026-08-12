@@ -92,6 +92,7 @@ class RenderTarget:
         self.warnings = []
         self.captions = []
         self.line_charts = []
+        self.plotly_charts = []
         self.clicked_labels = set(clicked_labels)
 
     def button(self, label, **kwargs):
@@ -138,6 +139,9 @@ class RenderTarget:
 
     def line_chart(self, value, **kwargs):
         self.line_charts.append((value, kwargs))
+
+    def plotly_chart(self, value, **kwargs):
+        self.plotly_charts.append((value, kwargs))
 
     def __getattr__(self, _name):
         return lambda *args, **kwargs: None
@@ -421,9 +425,16 @@ def test_live_ai_section_renders_readable_market_presentation(monkeypatch):
     assert len(target.metrics) == 4 and len(target.tables) == 4
     assert list(target.tables[0]["지표"]) == ["잔여수요 30분 평균 변동폭", "전력수요 30분 평균 변동폭", "재생에너지 30분 평균 변동폭"]
     assert set(target.tables[2]["변수"]) == {"전력수요", "잔여수요", "태양광+풍력 발전량", "잔여수요 변동폭 |Δ잔여수요|"}
-    assert len(target.line_charts) == 2
-    assert list(target.line_charts[0][0].index) == ["00:00", "08:30"]
-    assert list(target.line_charts[0][0].columns) == ["1차 조정력 모집량", "잔여수요 30분 변동"]
+    assert len(target.plotly_charts) == 1
+    figure = target.plotly_charts[0][0]
+    assert [trace.name for trace in figure.data] == ["1차 조정력 모집량", "잔여수요 30분 변동폭"]
+    assert list(figure.data[0].y) == [550.0, 590.0]
+    assert list(figure.data[1].y) == [700.0, 900.0]
+    assert figure.data[0].yaxis == "y" and figure.data[1].yaxis == "y2"
+    assert figure.layout.yaxis.title.text == "1차 조정력 모집량 (MW)"
+    assert figure.layout.yaxis2.title.text == "잔여수요 30분 변동폭 (MW)"
+    assert "customdata[0]" in figure.data[0].hovertemplate and "customdata[1]" in figure.data[0].hovertemplate
+    assert "주간 평균 = 100" not in rendered
     assert "전력수요 − 태양광 발전량 − 풍력 발전량" in rendered
     assert "시간적으로 연속된 30분 잔여수요 값의 절대 변화량" in rendered
     assert "도쿄전력파워그리드(TEPCO PG)" in rendered
