@@ -1,6 +1,6 @@
 {
-  "last_request_date_jst": "2026-08-31",
-  "requested_at_jst": "2026-08-31T08:16:20.249152+09:00",
+  "last_request_date_jst": "2026-09-01",
+  "requested_at_jst": "2026-09-01T09:25:49.281765+09:00",
   "source_url": "https://www.eprx.or.jp/information/files/2026_1-0_prompt.zip",
   "status": "완료",
   "user_agent": "LX-International-Japan-Market-Monitor/1.0 (EPRX-approved; internal-analysis; daily-download)",
@@ -89,18 +89,36 @@
         "Tohoku",
         "Tokyo"
       ]
+    },
+    {
+      "file_name": "202609_1-0_prompt.csv",
+      "rows": 432,
+      "date_min": "2026-09-01",
+      "date_max": "2026-09-01",
+      "areas": [
+        "Chubu",
+        "Chugoku",
+        "Hokkaido",
+        "Hokuriku",
+        "Kansai",
+        "Kyushu",
+        "Shikoku",
+        "Tohoku",
+        "Tokyo"
+      ]
     }
   ],
   "final_url": "https://www.eprx.or.jp/information/files/2026_1-0_prompt.zip",
-  "archive_sha256": "b2b93ab4fb5992179e5eda3cd8496a6a4779a9ea3a98a5aee5350327f624a4fc",
-  "archive_size": 1600355,
+  "archive_sha256": "f2d6df564f79cf3f11ea88bf90a8c695626e9158a94c0673b90fd101baebd6d2",
+  "archive_size": 1612352,
   "changed_files": [
-    "202608_1-0_prompt.csv"
+    "202609_1-0_prompt.csv"
   ],
   "unchanged_files": [
     "202604_1-0_prompt.csv",
     "202605_1-0_prompt.csv",
     "202606_1-0_prompt.csv",
-    "202607_1-0_prompt.csv"
+    "202607_1-0_prompt.csv",
+    "202608_1-0_prompt.csv"
   ]
 }
