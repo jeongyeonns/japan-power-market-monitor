@@ -96,6 +96,15 @@ def calculate_area_kpis(
         ),
         raw_awarded,
     )
+    if "_aggregate_complete" in raw_area_data:
+        # Group ratios use raw summed MW, never averages of constituent ratios.
+        procurement_sum = raw_area_data["procurement_volume"].sum(min_count=1)
+        bid_sum = raw_area_data["bid_volume"].sum(min_count=1)
+        awarded_sum = raw_awarded
+        if not raw_area_data["_aggregate_complete"].all():
+            return {label: np.nan for label in AREA_KPI_ORDER}
+        if (raw_area_data["avg_price"].isna() & raw_area_data["awarded_volume"].gt(0)).any():
+            weighted_price = np.nan
     return {
         "평균 모집량 (MW)": procurement_average,
         "평균 입찰량 (MW)": bid_average,
@@ -121,7 +130,7 @@ def create_area_kpi_table(
     selected_areas = _normalize_analysis_areas(areas)
     values: dict[str, dict[str, float]] = {}
     for area in selected_areas:
-        values[AREA_DISPLAY[area]] = calculate_area_kpis(
+        values[AREA_DISPLAY.get(area, area)] = calculate_area_kpis(
             area_profile.loc[area_profile["area"].eq(area)],
             raw_week_data.loc[raw_week_data["area"].eq(area)],
         )
@@ -285,7 +294,7 @@ def calculate_previous_week_comparison(
             absolute = current_value - previous_value
             rows.append(
                 {
-                    "지역": AREA_DISPLAY[area],
+                    "지역": AREA_DISPLAY.get(area, area),
                     "지표": metric,
                     "현재 주": current_value,
                     "전주": previous_value,

@@ -77,6 +77,18 @@ def create_regional_weekly_profile(
     grouped["expected_observation_count"] = (
         grouped["market_regime"].map(expected_days).astype(int)
     )
+    if "_aggregate_complete" in selected:
+        # Do not average only the remaining regions/days into a normal-looking slot.
+        completeness = selected.groupby(
+            ["area", "frequency_zone", "market_regime", "period_no", "period_start"],
+            as_index=False, observed=True,
+        ).agg(
+            _all_complete=("_aggregate_complete", "all"),
+            _complete_days=("_aggregate_complete", "sum"),
+        )
+        grouped = grouped.merge(completeness)
+        grouped.loc[~grouped["_all_complete"], VALUE_COLUMNS] = np.nan
+        grouped["observation_count"] = grouped["_complete_days"].astype(int)
     grouped["data_status"] = np.where(
         grouped["observation_count"].eq(grouped["expected_observation_count"]),
         "Complete",

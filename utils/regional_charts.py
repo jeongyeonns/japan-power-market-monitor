@@ -22,7 +22,7 @@ AUTOSCALE_HINT = "화면이 확대·이동된 경우 Autoscale을 눌러주세�
 
 def _display_data(profile: pd.DataFrame, areas: list[str]) -> pd.DataFrame:
     data = profile.loc[profile["area"].isin(areas)].copy()
-    data["지역"] = data["area"].map(AREA_NAMES)
+    data["지역"] = data["area"].map(AREA_NAMES).fillna(data["area"])
     return data
 
 
@@ -101,7 +101,7 @@ def _add_previous_week_traces(
                 mode="lines",
                 name=_week_trace_name("직전 주", area, len(areas)),
                 legendgroup=area,
-                line={"color": AREA_COLORS[display], "width": 1.5, "dash": "dash"},
+                line={"color": AREA_COLORS.get(display, "#636efa"), "width": 1.5, "dash": "dash"},
                 opacity=0.35,
                 customdata=customdata,
                 hovertemplate=hovertemplate,
@@ -144,6 +144,7 @@ def area_max_price_chart(
     areas: list[str],
     price_unit: str,
     previous_profile: pd.DataFrame | None = None,
+    regional_comparison: bool = False,
 ) -> go.Figure:
     data = _display_data(profile, areas)
     area_label = "·".join(AREA_NAMES.get(area, area) for area in areas)
@@ -166,7 +167,10 @@ def area_max_price_chart(
         f"평균 최고 낙찰가격(전원 소재지별)=%{{y:,.2f}} {price_unit}"
         "<extra></extra>"
     )
-    _rename_current_week_traces(figure, areas, hovertemplate)
+    if regional_comparison:
+        figure.update_traces(hovertemplate=hovertemplate.replace("주차=", "지역="))
+    else:
+        _rename_current_week_traces(figure, areas, hovertemplate)
     _add_previous_week_traces(
         figure, previous_profile, areas, "max_price", hovertemplate
     )
@@ -186,6 +190,7 @@ def area_award_rate_chart(
     profile: pd.DataFrame,
     areas: list[str],
     previous_profile: pd.DataFrame | None = None,
+    regional_comparison: bool = False,
 ) -> go.Figure:
     data = _display_data(profile, areas)
     area_label = "·".join(AREA_NAMES.get(area, area) for area in areas)
@@ -210,7 +215,10 @@ def area_award_rate_chart(
         "낙찰량(전원 소재지별)=%{customdata[1]:,.2f} MW<br>"
         "입찰 대비 낙찰률=%{y:.2%}<extra></extra>"
     )
-    _rename_current_week_traces(figure, areas, hovertemplate)
+    if regional_comparison:
+        figure.update_traces(hovertemplate=hovertemplate.replace("주차=", "지역="))
+    else:
+        _rename_current_week_traces(figure, areas, hovertemplate)
     _add_previous_week_traces(
         figure,
         previous_profile,
