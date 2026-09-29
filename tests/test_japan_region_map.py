@@ -64,26 +64,32 @@ def test_map_is_between_description_and_market_selector():
 
 
 def test_streamlit_map_updates_without_extra_rerun():
+    # Allow cold Streamlit imports; execution counts still guard against extra reruns.
     app = AppTest.from_string('''
 import streamlit as st
 from utils.japan_region_map import render_japan_region_map
 from utils.eprx_area_groups import AGGREGATE_REGION_GROUPS
+st.session_state.map_test_runs = st.session_state.get("map_test_runs", 0) + 1
 render_japan_region_map(st, st.session_state)
 st.radio("분석 단위", ["개별 지역", "광역권·합산"], key="eprx_analysis_unit")
 if st.session_state.eprx_analysis_unit == "개별 지역":
     st.radio("지역", ["홋카이도", "도쿄"], key="regional_view_mode")
 else:
     st.radio("합산", list(AGGREGATE_REGION_GROUPS), key="eprx_aggregate_group")
-''').run()
+''', default_timeout=10).run()
     assert not app.exception
+    assert app.session_state.map_test_runs == 1
     app.radio(key='regional_view_mode').set_value('도쿄').run()
+    assert app.session_state.map_test_runs == 2
     iframe = app.get('iframe')[0].proto
     assert not iframe.src
     html = iframe.srcdoc
     groups = svg_elements(html).findall('{http://www.w3.org/2000/svg}g')
     assert [g.attrib['data-region'] for g in groups if g.attrib['data-selected'] == 'true'] == ['Tokyo']
     app.radio(key='eprx_analysis_unit').set_value('광역권·합산').run()
+    assert app.session_state.map_test_runs == 3
     app.radio(key='eprx_aggregate_group').set_value('중부+호쿠리쿠+간사이').run()
+    assert app.session_state.map_test_runs == 4
     assert not app.exception
     html = app.get('iframe')[0].proto.srcdoc
     groups = svg_elements(html).findall('{http://www.w3.org/2000/svg}g')
