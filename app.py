@@ -12,6 +12,12 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from utils.eprx_areas import EPRX_AREA_DISPLAY, EPRX_AREA_OPTIONS
+from utils.japan_region_map import render_japan_region_map
+from utils.eprx_area_groups import (
+    AGGREGATE_REGION_GROUPS,
+    AGGREGATE_REGION_CAPTIONS,
+    aggregate_region_data,
+)
 from utils.eprx_loader import find_eprx_files, load_all_eprx_data
 from utils.eprx_periods import (
     EPRX_REFORM_DATE,
@@ -695,7 +701,8 @@ def render_excess_award_warning(
 
 
 def render_hierarchical_metric_table(
-    target, data: pd.DataFrame, metric_column: str = "지표"
+    target, data: pd.DataFrame, metric_column: str = "지표",
+    change_rates: dict[tuple[str, str], float] | None = None,
 ) -> None:
     """고정 지표명의 본문과 괄호 설명을 분리한 작은 비교표를 표시합니다."""
     display = data.reset_index(names=metric_column) if metric_column not in data else data
@@ -719,6 +726,15 @@ def render_hierarchical_metric_table(
         for column in display.columns:
             value = row[column]
             content = label_html(value) if column == metric_column else escape(str(value))
+            if column != metric_column and change_rates is not None:
+                rate = change_rates.get((row[metric_column], column))
+                if rate is not None and pd.notna(rate) and np.isfinite(rate):
+                    content = (
+                        '<span class="metric-inline-value">'
+                        f'<span class="metric-current-value">{content}</span>'
+                        f'<span class="metric-change-rate">({rate:+.2%})</span>'
+                        '</span>'
+                    )
             css_class = "metric-name-cell" if column == metric_column else "metric-value-cell"
             cells.append(f'<td class="{css_class}">{content}</td>')
         rows.append(f"<tr>{''.join(cells)}</tr>")
@@ -732,6 +748,9 @@ def render_hierarchical_metric_table(
 .metric-hierarchy-table th { text-align: right; font-weight: 600; }
 .metric-hierarchy-table th:first-child, .metric-name-cell { text-align: left; }
 .metric-value-cell { text-align: right; font-variant-numeric: tabular-nums; }
+.metric-current-value { color: inherit; }
+.metric-inline-value { white-space: nowrap; }
+.metric-change-rate { color: #8a8a8a; font-size: 0.85em; margin-left: 0.45em; white-space: nowrap; }
 .metric-label-main { color: inherit; font-size: 0.95rem; font-weight: 500; }
 .metric-label-sub { color: #8a8f98; font-size: 0.75rem; margin-left: 0.25rem; }
 @media (max-width: 700px) { .metric-label-sub { display: block; margin-left: 0; } }
@@ -1073,27 +1092,53 @@ def _render_eprx_time_charts(
     price_unit: str,
     heading: str | None = None,
     notice: str | None = None,
+    group_name: str | None = None,
 ) -> None:
-    """하나의 거래제도 구간에 대한 두 시간대 그래프를 공통 렌더링합니다."""
+    """제목·설명·그래프 순서로 개별지역 또는 구성 지역 비교를 표시합니다."""
     if heading:
         target.markdown(f"#### {heading}")
     if notice:
         target.caption(notice)
-    target.caption("전원 소재지별 최고 낙찰가격의 동일 시간대 평균")
-    target.plotly_chart(
-        area_max_price_chart(
-            segment_profile, visible_areas, price_unit, previous_profile
-        ),
-        width="stretch",
+    comparison = group_name is not None
+    previous = None if comparison else previous_profile
+    price = area_max_price_chart(
+        segment_profile, visible_areas, price_unit, previous,
+        regional_comparison=comparison,
     )
-    target.caption("입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다.")
-    target.plotly_chart(
-        area_award_rate_chart(
-            segment_profile, visible_areas, previous_profile
-        ),
-        width="stretch",
+    rate = area_award_rate_chart(
+        segment_profile, visible_areas, previous,
+        regional_comparison=comparison,
     )
-    if previous_profile.empty:
+    if comparison:
+        label = "지역별"
+        if group_name == "전국 합산":
+            subject = "전국 9개 지역의"
+        else:
+            subject = "·".join(AREA_DISPLAY[area] for area in visible_areas) + " 각 지역의"
+        price_caption = f"{subject} 최고 낙찰가격을 동일 시간대 기준으로 비교합니다."
+        rate_caption = f"{subject} 입찰 대비 낙찰률을 동일 시간대 기준으로 비교합니다."
+    else:
+        label = "·".join(AREA_DISPLAY.get(area, area) for area in visible_areas)
+        price_caption = "전원 소재지별 최고 낙찰가격의 동일 시간대 평균"
+        rate_caption = "입찰량과 낙찰량 모두 전원 소재지별 공표값을 사용합니다."
+    for figure, title, caption in (
+        (price, f"{label} 시간대별 평균 최고 낙찰가격", price_caption),
+        (rate, f"{label} 시간대별 입찰 대비 낙찰률", rate_caption),
+    ):
+        target.subheader(title)
+        target.caption(caption)
+        # Streamlit's Plotly theme stringifies title.text; an empty object becomes
+        # "undefined", so keep an explicit empty text with the external heading.
+        figure.update_layout(title_text="", margin=dict(t=35))
+        if comparison:
+            figure.update_layout(
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=-0.25,
+                            itemclick="toggle", itemdoubleclick="toggleothers"),
+                height=480,
+            )
+        target.plotly_chart(figure, width="stretch")
+    if not comparison and previous_profile.empty:
         target.caption("직전 주 비교 데이터가 없습니다.")
 
 
@@ -1102,7 +1147,7 @@ def _prepare_eprx_detail_table(
 ) -> pd.DataFrame:
     """선택 제도 구간의 시간대 상세 표를 화면용 열로 변환합니다."""
     detailed = profile.loc[profile["area"].isin(visible_areas)].copy()
-    detailed["area"] = detailed["area"].map(AREA_DISPLAY)
+    detailed["area"] = detailed["area"].map(AREA_DISPLAY).fillna(detailed["area"])
     detailed["completeness_flag"] = detailed["completeness_flag"].replace(
         {"Complete": "데이터 완전", "Incomplete": "데이터 불완전"}
     )
@@ -1172,14 +1217,54 @@ def render_regional_analysis(
     price_unit: str,
 ) -> None:
     """선택한 EPRX 지역의 상세분석을 표시합니다."""
+    original_data = data
     target.subheader("지역별 분석")
-    view = target.radio(
-        "분석할 지역을 선택하세요.",
-        list(EPRX_REGION_OPTIONS),
-        horizontal=True,
-        key="regional_view_mode",
+    analysis_unit = target.radio(
+        "분석 단위", ["개별 지역", "광역권·합산"],
+        horizontal=True, key="eprx_analysis_unit",
     )
-    selected_area = EPRX_REGION_OPTIONS[view]
+    # Keep the individual selection across Streamlit's hidden-widget cleanup.
+    if analysis_unit == "개별 지역":
+        if "regional_view_mode" not in st.session_state:
+            st.session_state["regional_view_mode"] = st.session_state.get(
+                "eprx_last_individual_area", next(iter(EPRX_REGION_OPTIONS))
+            )
+        view = target.radio(
+            "분석할 지역을 선택하세요.",
+            list(EPRX_REGION_OPTIONS),
+            horizontal=True,
+            key="regional_view_mode",
+        )
+        st.session_state["eprx_last_individual_area"] = view
+        selected_area = EPRX_REGION_OPTIONS[view]
+    else:
+        view = target.radio(
+            "분석할 광역권·합산을 선택하세요.", list(AGGREGATE_REGION_GROUPS),
+            horizontal=True, key="eprx_aggregate_group",
+        )
+        selected_area = view
+        selected_start = pd.Timestamp(selected_week).normalize()
+        previous_available, _ = find_previous_week(data, selected_week)
+        needed_weeks = [selected_start, selected_start - pd.Timedelta(days=7)]
+        if previous_available is not None:
+            needed_weeks.append(previous_available)
+        data, diagnostics = aggregate_region_data(
+            data.loc[data["week_start"].isin(needed_weeks)], view
+        )
+        incomplete = diagnostics.loc[~diagnostics["_aggregate_complete"]]
+        if not incomplete.empty:
+            missing = set().union(*incomplete["missing_regions"])
+            names = "·".join(
+                EPRX_AREA_DISPLAY[area]
+                for area in AGGREGATE_REGION_GROUPS[view] if area in missing
+            )
+            if names:
+                target.warning(f"일부 지역 데이터가 누락되어 있습니다: {names}")
+            else:
+                target.warning("일부 코마에 중복 지역 행 또는 물량 결측이 있습니다.")
+            target.caption("현재·비교 주차의 불완전한 코마는 합산값을 표시하지 않습니다.")
+            with target.expander("지역 합산 데이터 진단"):
+                st.dataframe(incomplete, hide_index=True, width="stretch")
     visible_areas = [selected_area]
     profile = create_selected_area_weekly_profile(
         data, selected_week, visible_areas
@@ -1219,6 +1304,8 @@ def render_regional_analysis(
     over_rate = profile.loc[profile["procurement_rate"] > 1]
 
     target.subheader(f"{view} 주간 핵심지표")
+    if analysis_unit == "광역권·합산":
+        target.caption(AGGREGATE_REGION_CAPTIONS[view])
     weekly_kpi_rows = [
         "평균 모집량 (MW)",
         "평균 입찰량 (MW)",
@@ -1226,6 +1313,9 @@ def render_regional_analysis(
         "입찰 대비 낙찰률 (%)",
     ]
     kpi_display = kpi_table.reindex(weekly_kpi_rows)[[view]].copy().astype(object)
+    if analysis_unit == "광역권·합산":
+        weekly_kpi_rows = weekly_kpi_rows[:3]
+        kpi_display = kpi_display.iloc[:3]
     percent_rows = {"입찰 대비 낙찰률 (%)"}
     for row in kpi_display.index:
         for column in kpi_display.columns:
@@ -1248,24 +1338,27 @@ def render_regional_analysis(
             "최저 낙찰가격": f"최저 낙찰가격 (전원 소재지별, {price_unit})",
         }
     )
-    render_hierarchical_metric_table(target, kpi_display)
-
-    if not over_rate.empty:
-        source_over = raw_week.loc[
-            raw_week["area"].isin(visible_areas)
-            & (
-                raw_week["awarded_volume"]
-                > raw_week["procurement_volume"]
-            )
-        ]
-        render_excess_award_warning(
-            target,
-            {
-                AREA_DISPLAY[area]: int(count)
-                for area, count in over_rate.groupby("area").size().items()
-            },
-            len(source_over),
+    change_rates = {}
+    if not previous.empty:
+        for metric in weekly_kpi_rows[:3]:
+            matches = previous.loc[
+                previous["지역"].eq(view) & previous["지표"].eq(metric), "변화율"
+            ]
+            if not matches.empty and pd.notna(kpi_table.loc[metric, view]):
+                display_label = kpi_display.index[weekly_kpi_rows.index(metric)]
+                change_rates[(display_label, view)] = matches.iloc[0]
+    render_hierarchical_metric_table(target, kpi_display, change_rates=change_rates)
+    if previous_meta["previous_week"] is not None:
+        target.caption(
+            f"비교 주차: {previous_meta['previous_week']:%Y-%m-%d} 시작 주"
         )
+
+    group_name = view if analysis_unit == "광역권·합산" else None
+    chart_areas = list(AGGREGATE_REGION_GROUPS[view]) if group_name else visible_areas
+    chart_profile = (
+        create_selected_area_weekly_profile(original_data, selected_week, chart_areas)
+        if group_name else profile
+    )
 
     regimes = set(profile["market_regime"].dropna())
     has_legacy_regime = LEGACY_REGIME in regimes
@@ -1301,79 +1394,40 @@ def render_regional_analysis(
             ].copy()
             _render_eprx_time_charts(
                 target,
-                segment_profile,
+                chart_profile.loc[chart_profile["market_regime"].isin(segment_regimes)],
                 previous_segment_profile,
-                visible_areas,
+                chart_areas,
                 price_unit,
                 heading=heading,
                 notice=notice,
+                group_name=group_name,
             )
     else:
         detail_segments.append((None, profile))
         _render_eprx_time_charts(
             target,
-            profile,
+            chart_profile,
             previous_profile.loc[
                 previous_profile["market_regime"].isin(regimes)
             ].copy(),
-            visible_areas,
+            chart_areas,
             price_unit,
+            group_name=group_name,
             notice=LEGACY_PERIOD_NOTICE if has_legacy_regime else None,
         )
-
-    target.subheader("전주 대비 변화")
-    if not previous.empty:
-        week_over_week_rows = [
-            "평균 모집량 (MW)",
-            "평균 입찰량 (MW)",
-            "평균 낙찰량 (MW)",
-        ]
-        previous_display = (
-            previous.loc[
-                previous["지역"].eq(view)
-                & previous["지표"].isin(week_over_week_rows)
-            ]
-            .set_index("지표")
-            .reindex(week_over_week_rows)
-            .reset_index()
-        )
-        previous_display["지역"] = view
-        previous_display["현재 주"] = previous_display["현재 주"].map(
-            lambda value: "계산 불가" if pd.isna(value) else f"{value:,.2f}"
-        )
-        previous_display["전주"] = previous_display["전주"].map(
-            lambda value: "계산 불가" if pd.isna(value) else f"{value:,.2f}"
-        )
-        previous_display["절대 변화"] = previous_display["절대 변화"].map(
-            lambda value: "계산 불가" if pd.isna(value) else f"{value:+,.2f}"
-        )
-        previous_display["변화율"] = previous_display["변화율"].map(
-            lambda value: "계산 불가" if pd.isna(value) else f"{value:+.2%}"
-        )
-        previous_display["지표"] = previous_display["지표"].replace(
-            {
-                "평균 모집량 (MW)": "평균 모집량 (TSO별, MW)",
-                "평균 입찰량 (MW)": "평균 입찰량 (전원 소재지별, MW)",
-                "평균 낙찰량 (MW)": "평균 낙찰량 (전원 소재지별, MW)",
-                "입찰경쟁률 (배)": "입찰경쟁률 (소재지별 입찰량 ÷ TSO별 모집량, 배)",
-                "조달률 (%)": "조달률 (소재지별 낙찰량 ÷ TSO별 모집량, %)",
-                "최고 낙찰가격": f"최고 낙찰가격 (전원 소재지별, {price_unit})",
-            }
-        )
-        target.caption(
-            f"비교 주차: {previous_meta['previous_week']:%Y-%m-%d} 시작 주"
-        )
-        render_hierarchical_metric_table(target, previous_display)
 
     target.subheader(f"{view} 시간대별 상세 데이터")
     target.caption(
         "데이터 기준: 모집량은 TSO별, 입찰량·낙찰량·낙찰가격은 전원 소재지별입니다. "
         "입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다."
     )
-    target.caption(
-        "최고·평균·최저 낙찰가격은 각 날짜에 공표된 값을 동일 시간대별로 모아 "
-        "선택 주차 또는 제도 구간 단위로 평균한 값입니다."
-    )
+    if not group_name:
+        target.caption(
+            "최고·평균·최저 낙찰가격은 각 날짜에 공표된 값을 동일 시간대별로 모아 "
+            "선택 주차 또는 제도 구간 단위로 평균한 값입니다."
+        )
+    else:
+        target.caption("물량은 포함 지역의 합계이며, 가격과 낙찰률은 위 지역별 그래프에서 비교합니다.")
     for segment_heading, segment_profile in detail_segments:
         if segment_heading:
             target.markdown(
@@ -1382,6 +1436,10 @@ def render_regional_analysis(
         detailed = _prepare_eprx_detail_table(
             segment_profile, visible_areas, price_unit
         )
+        if group_name:
+            detailed = detailed.drop(columns=[
+                column for column in detailed if "낙찰가격" in column or "낙찰률" in column
+            ])
         _render_eprx_detail_table(target, detailed, price_unit)
     with target.expander("데이터 기준 설명"):
         st.markdown(
@@ -1409,6 +1467,26 @@ def render_regional_analysis(
 입찰경쟁률과 조달률은 서로 다른 지역 귀속 기준을 비교하는 참고지표입니다.
 """
         )
+
+    with target.expander("데이터 확인 안내", expanded=False):
+        if not over_rate.empty:
+            source_over = raw_week.loc[
+                raw_week["area"].isin(visible_areas)
+                & (
+                    raw_week["awarded_volume"]
+                    > raw_week["procurement_volume"]
+                )
+            ]
+            render_excess_award_warning(
+                target,
+                {
+                    AREA_DISPLAY.get(area, area): int(count)
+                    for area, count in over_rate.groupby("area").size().items()
+                },
+                len(source_over),
+            )
+        else:
+            st.caption("낙찰량이 모집량을 초과한 시간대가 없습니다.")
 
 
 def render_jepx_market_placeholder() -> None:
@@ -1646,6 +1724,7 @@ def render_jepx_market_placeholder() -> None:
 
 st.title("일본 전력시장 모니터링")
 st.caption("EPRX 조정력시장 및 JEPX 현물시장 분석")
+render_japan_region_map(st, st.session_state)
 st.markdown(
     """
 <style>
