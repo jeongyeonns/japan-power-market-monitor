@@ -1722,9 +1722,25 @@ def render_jepx_market_placeholder() -> None:
             )
 
 
-st.title("일본 전력시장 모니터링")
-st.caption("EPRX 조정력시장 및 JEPX 현물시장 분석")
-render_japan_region_map(st, st.session_state)
+st.markdown(
+    """
+<style>
+@media (max-width: 800px) {
+  .st-key-main_header [data-testid="stHorizontalBlock"] { flex-direction: column; }
+  .st-key-main_header [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    width: 100%; flex: 1 1 100%; min-width: 0;
+  }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+with st.container(key="main_header"):
+    header_text, header_map = st.columns([3, 1.4], gap="medium", vertical_alignment="center")
+    with header_text:
+        st.title("일본 전력시장 모니터링")
+        st.caption("EPRX 조정력시장 및 JEPX 현물시장 분석")
+    render_japan_region_map(header_map, st.session_state)
 st.markdown(
     """
 <style>
