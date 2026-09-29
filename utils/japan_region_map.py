@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from html import escape
 
 from utils.eprx_area_groups import AGGREGATE_REGION_GROUPS
 from utils.eprx_areas import EPRX_AREA_DISPLAY, EPRX_AREA_OPTIONS
@@ -40,7 +39,7 @@ def selected_map_regions(state: Mapping) -> tuple[tuple[str, ...], str]:
 
 def region_map_html(state: Mapping) -> str:
     """Return a small responsive SVG card with Korean labels and selected outlines."""
-    selected, label = selected_map_regions(state)
+    selected, _ = selected_map_regions(state)
     all_selected = len(selected) == len(REGION_GEOMETRY)
     parts = []
     for area, (points, (ax, ay), (lx, ly)) in REGION_GEOMETRY.items():
@@ -56,32 +55,37 @@ def region_map_html(state: Mapping) -> str:
             f'stroke-width="{2.2 if active else 1.2}" stroke-linejoin="round"/>'
             f'<path d="M {ax},{ay} L {lx},{ly - 7}" fill="none" stroke="{stroke}" stroke-width="1"/>'
             f'<circle cx="{ax}" cy="{ay}" r="2.5" fill="{stroke}"/>'
-            f'<text x="{lx}" y="{ly}" text-anchor="middle" font-size="17" '
+            f'<text x="{lx}" y="{ly}" text-anchor="middle" font-size="21" '
             f'font-weight="{weight}" fill="currentColor">{name}</text></g>'
         )
-    selection = f'<span class="region-map-selection">선택: {escape(label)}</span>' if label else ""
     return (
-        '<style>.region-map-card{border:1px solid rgba(128,128,128,.22);'
-        'border-radius:12px;padding:.7rem 1rem .55rem;margin:.25rem 0 .6rem;}'
-        '.region-map-heading{display:flex;justify-content:space-between;gap:.5rem;'
-        'flex-wrap:wrap;font-size:.88rem;font-weight:600;}'
-        '.region-map-selection{font-size:.8rem;font-weight:400;color:#8a8a8a;}'
-        '.region-map-scroll{overflow-x:auto;}'
-        '.region-map-svg{display:block;width:100%;min-width:500px;max-height:280px;'
+        '<!doctype html><html lang="ko"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<style>html,body{margin:0;padding:0;background:transparent;color:#182b49;'
+        'font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}'
+        '*{box-sizing:border-box;}'
+        '.region-map-card{background:#fff;border:1px solid rgba(128,128,128,.22);'
+        'border-radius:10px;padding:8px;margin:0;}'
+        '.region-map-heading{font-size:.8rem;font-weight:600;line-height:18px;}'
+        '.region-map-scroll{width:100%;min-width:0;}'
+        '.region-map-svg{display:block;width:100%;height:200px;max-height:200px;min-width:0;'
         'font-family:inherit;}'
-        '.region-map-note{font-size:.78rem;color:#8a8a8a;margin:.2rem 0 0;}</style>'
+        '</style></head><body>'
         '<section class="region-map-card" aria-label="일본 전력 권역 안내">'
-        f'<div class="region-map-heading">일본 전력 권역 안내{selection}</div>'
+        '<div class="region-map-heading">일본 전력 권역</div>'
         '<div class="region-map-scroll"><svg class="region-map-svg" '
-        'xmlns="http://www.w3.org/2000/svg" viewBox="125 12 590 345" role="img" '
+        'xmlns="http://www.w3.org/2000/svg" width="590" height="200" '
+        'viewBox="125 12 590 345" preserveAspectRatio="xMidYMid meet" role="img" '
         'aria-labelledby="region-map-title region-map-description">'
         '<title id="region-map-title">일본 9개 전력 권역 위치 안내도</title>'
         '<desc id="region-map-description">북동쪽 홋카이도부터 도호쿠·도쿄, 중부·호쿠리쿠·간사이, '
         '서쪽 주고쿠와 남쪽 시코쿠·규슈의 대략적인 위치입니다.</desc>'
         + "".join(parts)
-        + '</svg></div><p class="region-map-note">분석 대상 권역의 대략적 위치를 표시한 안내도입니다.</p></section>'
+        + '</svg></div></section></body></html>'
     )
 
 
 def render_japan_region_map(target, state: Mapping) -> None:
-    target.html(region_map_html(state))
+    # st.html uses DOMPurify's HTML-only profile, which removes SVG elements.
+    # A local srcdoc iframe preserves SVG and provides an explicit viewport.
+    target.iframe(region_map_html(state), height=240)
