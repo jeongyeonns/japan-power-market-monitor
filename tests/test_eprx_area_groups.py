@@ -39,6 +39,10 @@ def test_sums_ratios_and_price_not_mean_of_ratios():
     assert (row.procurement_volume, row.bid_volume, row.awarded_volume) == (500, 300, 200)
     assert row.award_rate == pytest.approx(2 / 3)
     assert row.award_rate != .75
+    profile = create_selected_area_weekly_profile(data, "2026-07-20", [GROUP])
+    kpi_rate = calculate_area_kpis(profile, data)["입찰 대비 낙찰률 (%)"]
+    assert kpi_rate == pytest.approx(200 / 300)
+    assert kpi_rate != .75
     assert row.procurement_rate == .4
     assert (row.max_price, row.min_price, row.avg_price) == (15, 2, 9)
     assert diagnostics.iloc[0].missing_regions == ()

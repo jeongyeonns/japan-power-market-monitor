@@ -12,7 +12,7 @@ from utils.sample_data import generate_sample_data
 from utils.weekly_aggregation import add_week_columns, create_selected_area_weekly_profile
 
 
-def renderer_app(missing=False):
+def renderer_app(missing=False, zero_bid=False):
     source = Path("app.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     # Use the production functions without loading CSVs or external services.
@@ -22,6 +22,8 @@ def renderer_app(missing=False):
     script += "data = add_week_columns(generate_sample_data('2026-07-20'))\n"
     if missing:
         script += "data = data.loc[data.area.ne('Tohoku')]\n"
+    if zero_bid:
+        script += "data['bid_volume'] = 0.0\n"
     script += "render_regional_analysis(st, data, data.week_start.max(), 7, '엔')\n"
     return AppTest.from_string(script, default_timeout=30).run()
 
@@ -73,7 +75,13 @@ def test_constituent_lines_and_heading_caption_order():
         assert "지역별 시간대별 평균 최고 낙찰가격" in headings
         assert "지역별 시간대별 입찰 대비 낙찰률" in headings
         table = next(item.value for item in app.markdown if '<table' in item.value)
-        assert "입찰 대비 낙찰률" not in table
+        assert 'class="metric-label-main">입찰 대비 낙찰률</span>' in table
+        assert 'class="metric-label-sub">(전원 소재지별, %)</span>' in table
+        week = data.loc[data.week_start.eq(data.week_start.max()) & data.area.isin(areas)]
+        rate = week.awarded_volume.sum() / week.bid_volume.sum()
+        rate_row = next(row for row in table.split('<tr>') if '입찰 대비 낙찰률' in row)
+        assert f'{rate:.2%}' in rate_row
+        assert 'class="metric-change-rate"' not in rate_row
         assert table.count('class="metric-change-rate"') == 3
         for chart, column in zip(app.get("plotly_chart"), ["max_price", "award_rate"]):
             figure = json.loads(chart.proto.spec)
@@ -99,3 +107,19 @@ def test_constituent_lines_and_heading_caption_order():
         assert not expander.proto.expanded
         assert children[-1] is expander
         assert all(e.type != "warning" or "확인이 필요한 데이터" not in e.value for e in children)
+
+
+def test_zero_aggregate_bid_uses_individual_missing_formatter():
+    app = renderer_app(zero_bid=True)
+    individual = next(item.value for item in app.markdown if '<table' in item.value)
+    individual_row = next(row for row in individual.split('<tr>') if '입찰 대비 낙찰률' in row)
+    assert '계산 불가' in individual_row
+    app.radio(key="eprx_analysis_unit").set_value("광역권·합산").run()
+    for name in AGGREGATE_REGION_GROUPS:
+        app.radio(key="eprx_aggregate_group").set_value(name).run()
+        assert not app.exception
+        table = next(item.value for item in app.markdown if '<table' in item.value)
+        row = next(row for row in table.split('<tr>') if '입찰 대비 낙찰률' in row)
+        assert '계산 불가' in row
+        assert 'class="metric-change-rate"' not in row
+        assert '>nan<' not in row and '>inf<' not in row

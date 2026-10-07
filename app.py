@@ -1313,9 +1313,6 @@ def render_regional_analysis(
         "입찰 대비 낙찰률 (%)",
     ]
     kpi_display = kpi_table.reindex(weekly_kpi_rows)[[view]].copy().astype(object)
-    if analysis_unit == "광역권·합산":
-        weekly_kpi_rows = weekly_kpi_rows[:3]
-        kpi_display = kpi_display.iloc[:3]
     percent_rows = {"입찰 대비 낙찰률 (%)"}
     for row in kpi_display.index:
         for column in kpi_display.columns:
