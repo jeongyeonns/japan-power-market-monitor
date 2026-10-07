@@ -1,4 +1,7 @@
 from pathlib import Path
+import subprocess
+
+import pytest
 
 from utils.eprx_loader import find_eprx_files, load_all_eprx_data
 from utils.jepx_loader import find_jepx_files, load_all_jepx_data
@@ -58,4 +61,20 @@ def test_deployment_files_and_secret_ignores_exist():
     for entry in (".streamlit/secrets.toml", ".env", ".pytest_cache/", "data/jepx/raw/*"):
         assert entry in ignores
     assert "!data/eprx/202607_1-0_prompt.csv" in ignores
-    assert "!data/jepx/raw/spot_summary_2026.csv" in ignores
+    assert "!data/jepx/raw/spot_summary_*.csv" in ignores
+
+
+@pytest.mark.parametrize("path,ignored", [
+    ("data/jepx/raw/spot_summary_2026.csv", False),
+    ("data/jepx/raw/spot_summary_2027.csv", False),
+    ("data/jepx/raw/unrelated.csv", True),
+    ("data/jepx/raw/spot_summary_2027.xlsx", True),
+    (".streamlit/secrets.toml", True),
+])
+def test_jepx_public_csv_exception_preserves_other_ignores(path, ignored):
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--quiet", "--", path],
+        cwd=root, capture_output=True, text=True,
+    )
+    assert result.returncode == (0 if ignored else 1), result.stderr
