@@ -1,6 +1,6 @@
 {
-  "last_request_date_jst": "2026-11-11",
-  "requested_at_jst": "2026-11-11T10:05:17.813198+09:00",
+  "last_request_date_jst": "2026-11-12",
+  "requested_at_jst": "2026-11-12T11:08:38.116509+09:00",
   "source_url": "https://www.eprx.or.jp/information/files/2026_1-0_prompt.zip",
   "status": "완료",
   "user_agent": "LX-International-Japan-Market-Monitor/1.0 (EPRX-approved; internal-analysis; daily-download)",
@@ -126,9 +126,9 @@
     },
     {
       "file_name": "202611_1-0_prompt.csv",
-      "rows": 4752,
+      "rows": 5184,
       "date_min": "2026-11-01",
-      "date_max": "2026-11-11",
+      "date_max": "2026-11-12",
       "areas": [
         "Chubu",
         "Chugoku",
@@ -143,8 +143,8 @@
     }
   ],
   "final_url": "https://www.eprx.or.jp/information/files/2026_1-0_prompt.zip",
-  "archive_sha256": "af9f7edb1516762953e03c2386b464e83ed1632257d9134b11384df86569fcc8",
-  "archive_size": 2432972,
+  "archive_sha256": "ddcf4caab6af8d9b0d2f9b466c5835080ae2ceca51d70835b3b816e5610440c6",
+  "archive_size": 2444940,
   "changed_files": [
     "202611_1-0_prompt.csv"
   ],
